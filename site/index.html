@@ -1495,7 +1495,7 @@ function joinHtml() {
       ${testing ? `<p class="note small">Teacher test: use any ID number from a class list. You'll join that student's class.</p>` : ""}
       <div class="field"><label for="j-id">ID Number</label><input class="input" id="j-id" autocomplete="off" autocapitalize="characters" required placeholder="e.g. VS012345" style="font-family:var(--f-mono);letter-spacing:.06em"><span class="hint">Your Vinschool ID. It opens your own class and finds your name. Only your teacher sees it.</span></div>
       <div class="field"><label for="j-team">Group</label><select class="input" id="j-team" required><option value="">Choose your group</option>${TEAMS.map(t => `<option value="${t}">Group ${t}</option>`).join("")}</select></div>
-      <div class="field" id="j-klass-wrap" hidden><label for="j-klass">Class (test account)</label><select class="input" id="j-klass"><option value="">Choose a class</option>${classOptions(S.isTeacher ? S.klass : "")}</select><span class="hint">Test accounts VS01–VS10 can open any class.</span></div>
+      <div class="field" id="j-klass-wrap" hidden><label for="j-klass" id="j-klass-lab">Class (test account)</label><select class="input" id="j-klass"><option value="">Choose a class</option>${classOptions(S.isTeacher ? S.klass : "")}</select><span class="hint" id="j-klass-hint">Test accounts VS01–VS10 can open any class.</span></div>
       <p class="err" id="j-err" hidden></p>
       <button class="btn hot" type="submit">${ico("plane")} ${W.joinBtn}</button>
       ${Store.mode === "net" ? `<p class="small muted" style="text-align:center">Teacher? <a href="#teacher">Open the teacher dashboard</a></p>` : ""}
@@ -2450,7 +2450,7 @@ document.addEventListener("click", async e => {
 });
 document.addEventListener("input", e => {
   const t = e.target, d = curDraft();
-  if (t.id === "j-id") { const w = document.getElementById("j-klass-wrap"); if (w) w.hidden = !TEST_RE.test(normId(t.value)); }
+  if (t.id === "j-id") { const w = document.getElementById("j-klass-wrap"); if (w && !w.dataset.unlisted) w.hidden = !TEST_RE.test(normId(t.value)); }
   if (t.dataset.anote) S.aEdits[t.dataset.anote] = readAssess(t.dataset.anote);
   { const cn = document.getElementById(t.id + "-n"); if (cn && t.tagName === "TEXTAREA") cn.textContent = t.value.trim().length; }
   if (d && t.dataset.f && t.type !== "checkbox") { if (t.dataset.f.startsWith("det.")) { d.det = d.det || {}; setPath(d.det, t.dataset.f.slice(4), t.value); } else d[t.dataset.f] = t.value; refreshSubmit(); }
@@ -2603,9 +2603,18 @@ document.addEventListener("submit", async e => {
           try { const lr = await rosterLookup(sid); if (lr) { rd = lr.data; realName = lr.realName; } } catch (e2) { rd = null; }
           if (btn) btn.disabled = false;
           if (TEST_RE.test(sid) && !realName) realName = "Test student " + sid.slice(2);
-          if (!rd) { setFormMsg(err, "That ID number isn't on a class list yet. Check it with your teacher."); return; }
-          k = kOf(rd);
-          if (rd.test || TEST_RE.test(sid)) { k = v("j-klass"); if (!classOf(k)) { setFormMsg(err, "Choose a class for this test account."); return; } }
+          if (!rd) {
+            // Not on a class list (or the lists aren't loaded yet): let the student choose their class.
+            // The teacher's class list marks these accounts "Not on class list".
+            const w = document.getElementById("j-klass-wrap");
+            if (w && w.hidden) {
+              w.hidden = false; w.dataset.unlisted = "1";
+              if (!TEST_RE.test(sid)) { document.getElementById("j-klass-lab").textContent = "Your class"; document.getElementById("j-klass-hint").textContent = "We couldn't find your ID on a class list, so choose your class."; }
+            }
+            k = v("j-klass");
+            if (!classOf(k)) { setFormMsg(err, "We couldn't find your ID on a class list yet. Choose your class, then tap the button again."); return; }
+          } else k = kOf(rd);
+          if (rd && (rd.test || TEST_RE.test(sid))) { k = v("j-klass"); if (!classOf(k)) { setFormMsg(err, "Choose a class for this test account."); return; } }
           if (!classOf(k)) { setFormMsg(err, "Your class isn't open yet. Ask your teacher."); return; }
         }
         if (!S.isTeacher && !TEST_RE.test(sid)) {
@@ -2681,7 +2690,8 @@ setInterval(() => { if (S.isTeacher && !S.locked && !SC && Date.now() - (S.lastA
         const g = await Store.doc("people/" + uid).get(), d = g.exists ? g.data() : null;
         if (d && hasVS(d) && !d.signedOut && classOf(kOf(d))) {
           const lr = await rosterLookup(d.sid);
-          if (lr && (lr.data.test || TEST_RE.test(d.sid) || kOf(lr.data) === kOf(d))) {
+          if (!lr) k = kOf(d);   // not on a class list: stay in the class the student chose
+          else if (lr.data.test || TEST_RE.test(d.sid) || kOf(lr.data) === kOf(d)) {
             k = kOf(d);
             if (lr.realName && lr.realName !== d.realName) { try { await Store.doc("people/" + uid).update({ realName: lr.realName }); } catch (e4) { } }
           }
