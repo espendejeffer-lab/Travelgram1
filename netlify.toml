@@ -1,0 +1,18 @@
+# TravelGram on Netlify: the website is in "site", the API is a Netlify Function.
+[build]
+  publish = "site"
+  command = "echo 'No build step needed'"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# The page and audio change rarely; let browsers cache them briefly.
+[[headers]]
+  for = "/audio/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+[[headers]]
+  for = "/media/*.mp4"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
