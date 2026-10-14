@@ -150,6 +150,7 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
   async function login(body) {
     const lock = await meta.get("loginlock", { type: "json" }).catch(() => null) || { n: 0, until: 0 };
     if (lock.until > now()) return fail("too_many_attempts", 429);
+    if (!env("TEACHER_PASSWORD") && !(await meta.get("teacher", { type: "json" }).catch(() => null))) return fail("not_set_up", 503);
     if (!(await passwordOk(body && body.password))) {
       const n = (lock.n || 0) + 1;
       await meta.setJSON("loginlock", n >= 5 ? { n: 0, until: now() + 60000 } : { n, until: 0 });
@@ -266,12 +267,11 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
   };
 }
 
-let api = null;
+// Netlify gives each invocation its own short-lived Blobs token, so the stores are opened per
+// request. (Keeping them between requests made every call fail with "Token expired".)
+const env = k => (globalThis.Netlify && Netlify.env.get(k)) || process.env[k] || "";
 export default async (req, context) => {
-  if (!api) {
-    const store = name => getStore({ name, consistency: "strong" });
-    const env = k => (globalThis.Netlify && Netlify.env.get(k)) || process.env[k] || "";
-    api = makeApi({ docs: store("tg-docs"), logs: store("tg-log"), meta: store("tg-meta"), media: store("tg-media"), env });
-  }
+  const store = name => getStore({ name, consistency: "strong" });
+  const api = makeApi({ docs: store("tg-docs"), logs: store("tg-log"), meta: store("tg-meta"), media: store("tg-media"), env });
   return api(req, context);
 };

@@ -1144,7 +1144,20 @@ const Remote = {
     this.admin = j.admin; ssSet("tg-admin", j.admin); this.isAdmin = true;
     this.since = "0"; await this.pull(); this.loop();
   },
-  logout() { this.admin = ""; this.isAdmin = false; ssSet("tg-admin", ""); }
+  logout() { this.admin = ""; this.isAdmin = false; ssSet("tg-admin", ""); },
+  // Shared devices: every ID number used on this browser keeps its own account, so a classmate
+  // can sign in here and the first student gets their own account (and posts) back later.
+  async useAccount(prevSid, sid) {
+    let map = {}; try { map = JSON.parse(lsGet("tg-tokens") || "{}") || {}; } catch (e) { map = {}; }
+    if (prevSid) map[prevSid] = this.token;
+    let t = map[sid];
+    if (!/^[a-f0-9]{64}$/.test(t || "")) t = hexOf(crypto.getRandomValues(new Uint8Array(32)));
+    const old = this.token; this.token = t;
+    try { const me = await this.req("GET", "/me"); this.uid = me.uid; }
+    catch (e) { this.token = old; throw e; }
+    map[sid] = t; lsSet("tg-tokens", JSON.stringify(map)); lsSet("tg-token", t);
+    return this.uid;
+  }
 };
 const Store = {
   mode: "local", db: null, user: null, assets: null,
@@ -2510,7 +2523,7 @@ document.addEventListener("submit", async e => {
       toast(`Class list saved: ${out.length} students`);
     } else if (f.id === "f-tlogin") {
       try { await Remote.login(document.getElementById("tl-pw").value); }
-      catch (e2) { document.getElementById("tl-pw").value = ""; setFormMsg("#tl-err", e2 && e2.code === "too_many_attempts" ? "Too many tries. Wait a minute, then try again." : e2 && e2.code === "network" ? "Can't reach TravelGram. Check your internet connection." : "That password isn't right. Try again."); return; }
+      catch (e2) { document.getElementById("tl-pw").value = ""; setFormMsg("#tl-err", e2 && e2.code === "too_many_attempts" ? "Too many tries. Wait a minute, then try again." : e2 && e2.code === "not_set_up" ? "The teacher password isn't set up yet. In Netlify, add TEACHER_PASSWORD under Project configuration → Environment variables, then deploy again." : e2 && e2.code === "server_error" ? "TravelGram's server had a problem. Wait a moment, then try again." : e2 && e2.code === "network" ? "Can't reach TravelGram. Check your internet connection." : "That password isn't right. Try again."); return; }
       S.isTeacher = true; S.locked = false; S.lastAct = Date.now(); S.viewAsStudent = false;
       const saved = lsGet("tg-klass-t"); setKlass(classOf(saved) ? saved : classList()[0].k);
       startSubs(); go("teacher"); toast("The dashboard is open");
@@ -2584,19 +2597,28 @@ document.addEventListener("submit", async e => {
           sid = normId(v("j-id"));
           if (!sid) { setFormMsg(err, "Type your ID number."); return; }
           if (!ID_RE.test(sid)) { setFormMsg(err, "ID numbers look like VS012345. Check yours and try again."); return; }
-          let rd = null;
+          let rd = null, offline = false;
           const btn = f.querySelector("button[type=submit]"); if (btn) btn.disabled = true; setFormMsg(err, "");
-          try { const lr = await rosterLookup(sid); if (lr) { rd = lr.data; realName = lr.realName; } } catch (e2) { rd = null; }
+          try { const lr = await rosterLookup(sid); if (lr) { rd = lr.data; realName = lr.realName; } } catch (e2) { rd = null; offline = true; }
           if (btn) btn.disabled = false;
+          if (offline) { setFormMsg(err, "Can't reach TravelGram right now. Check your internet, wait a moment, then try again."); return; }
           if (TEST_RE.test(sid) && !realName) realName = "Test student " + sid.slice(2);
           if (!rd) { setFormMsg(err, "That ID number isn't on a class list yet. Check it with your teacher."); return; }
           k = kOf(rd);
           if (rd.test || TEST_RE.test(sid)) { k = v("j-klass"); if (!classOf(k)) { setFormMsg(err, "Choose a class for this test account."); return; } }
           if (!classOf(k)) { setFormMsg(err, "Your class isn't open yet. Ask your teacher."); return; }
         }
-        if (!S.isTeacher && !TEST_RE.test(sid)) {
+        if (!S.isTeacher && (Store.mode === "net" || !TEST_RE.test(sid))) {
           let prev = null; try { const g = await Store.doc("people/" + curUid()).get(); prev = g.exists ? g.data() : null; } catch (e3) { }
-          if (prev && prev.sid && !TEST_RE.test(prev.sid) && prev.sid !== sid) { setFormMsg(err, "This account is already linked to a different ID number. Sign in with your own ID, or ask your teacher."); return; }
+          if (Store.mode === "net" && prev && prev.sid && prev.sid !== sid) {
+            // Another student used this device before: switch to this student's own account (new or returning).
+            try { await Remote.useAccount(prev.sid, sid); } catch (e4) { setFormMsg(err, "That didn't work. Check your internet and try again."); return; }
+            let mine = null; try { const g = await Remote.doc("people/" + Remote.uid).get(); mine = g.exists ? g.data() : null; } catch (e3) { }
+            try { await Remote.doc("people/" + Remote.uid).set({ ...(mine || {}), k, name, realName, team, sid, ...(TEST_RE.test(sid) ? { test: true } : {}), rulesAccepted: !!(mine && mine.rulesAccepted), joinedAt: (mine && mine.joinedAt) || Date.now(), signedOut: false }); }
+            catch (e5) { setFormMsg(err, "That didn't save. Check your internet and try again."); return; }
+            location.hash = "#feed"; location.reload(); return;
+          }
+          if (Store.mode !== "net" && prev && prev.sid && !TEST_RE.test(prev.sid) && prev.sid !== sid) { setFormMsg(err, "This account is already linked to a different ID number. Sign in with your own ID, or ask your teacher."); return; }
         }
         if (!curUid()) { setFormMsg(err, "Sign in first, then open this link again."); return; }
         try { await Store.doc("people/" + curUid()).set({ k, name, realName, team, sid, ...(TEST_RE.test(sid) ? { test: true } : {}), rulesAccepted: false, joinedAt: Date.now() }); }
