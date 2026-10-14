@@ -1144,7 +1144,21 @@ const Remote = {
     this.admin = j.admin; ssSet("tg-admin", j.admin); this.isAdmin = true;
     this.since = "0"; await this.pull(); this.loop();
   },
-  logout() { this.admin = ""; this.isAdmin = false; ssSet("tg-admin", ""); }
+  logout() { this.admin = ""; this.isAdmin = false; ssSet("tg-admin", ""); },
+  // Shared devices: each ID number signed in on this browser keeps its own account token,
+  // so a classmate can join here and the first student gets their account back later.
+  async useAccount(prevSid, sid) {
+    let map = {}; try { map = JSON.parse(lsGet("tg-tokens") || "{}") || {}; } catch (e) { }
+    if (prevSid) map[prevSid] = this.token;
+    let t = map[sid];
+    if (!/^[a-f0-9]{64}$/.test(t || "")) t = hexOf(crypto.getRandomValues(new Uint8Array(32)));
+    map[sid] = t; lsSet("tg-tokens", JSON.stringify(map));
+    const old = this.token; this.token = t;
+    try { const me = await this.req("GET", "/me"); this.uid = me.uid; }
+    catch (e) { this.token = old; throw e; }
+    lsSet("tg-token", t);
+    return this.uid;
+  }
 };
 const Store = {
   mode: "local", db: null, user: null, assets: null,
@@ -2596,7 +2610,15 @@ document.addEventListener("submit", async e => {
         }
         if (!S.isTeacher && !TEST_RE.test(sid)) {
           let prev = null; try { const g = await Store.doc("people/" + curUid()).get(); prev = g.exists ? g.data() : null; } catch (e3) { }
-          if (prev && prev.sid && !TEST_RE.test(prev.sid) && prev.sid !== sid) { setFormMsg(err, "This account is already linked to a different ID number. Sign in with your own ID, or ask your teacher."); return; }
+          if (prev && prev.sid && !TEST_RE.test(prev.sid) && prev.sid !== sid) {
+            if (Store.mode !== "net") { setFormMsg(err, "This account is already linked to a different ID number. Sign in with your own ID, or ask your teacher."); return; }
+            // Another student used this device before: switch to (or create) this student's own account.
+            try { S.uid = await Remote.useAccount(prev.sid, sid); } catch (e4) { setFormMsg(err, "That didn't work. Check your connection and try again."); return; }
+            let mine = null; try { const g = await Store.doc("people/" + S.uid).get(); mine = g.exists ? g.data() : null; } catch (e3) { }
+            try { await Store.doc("people/" + S.uid).set({ ...(mine || {}), k, name, realName, team, sid, rulesAccepted: !!(mine && mine.rulesAccepted), joinedAt: (mine && mine.joinedAt) || Date.now(), signedOut: false }); }
+            catch (e5) { setFormMsg(err, "That didn't save. Check your connection and try again."); return; }
+            location.hash = "#feed"; location.reload(); return;
+          }
         }
         if (!curUid()) { setFormMsg(err, "Sign in first, then open this link again."); return; }
         try { await Store.doc("people/" + curUid()).set({ k, name, realName, team, sid, ...(TEST_RE.test(sid) ? { test: true } : {}), rulesAccepted: false, joinedAt: Date.now() }); }
