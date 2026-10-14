@@ -4,6 +4,6 @@
   "type": "module",
   "description": "TravelGram class site: static page plus a Netlify Function API on Netlify Blobs",
   "dependencies": {
-    "@netlify/blobs": "^8.1.0"
+    "@netlify/blobs": "^11.1.4"
   }
 }
