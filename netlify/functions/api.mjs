@@ -266,12 +266,11 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
   };
 }
 
-let api = null;
+// Open the stores on every request: the Blobs access token belongs to the request, so stores
+// kept from an earlier request stop working once it expires ("Token expired").
 export default async (req, context) => {
-  if (!api) {
-    const store = name => getStore({ name, consistency: "strong" });
-    const env = k => (globalThis.Netlify && Netlify.env.get(k)) || process.env[k] || "";
-    api = makeApi({ docs: store("tg-docs"), logs: store("tg-log"), meta: store("tg-meta"), media: store("tg-media"), env });
-  }
+  const store = name => getStore({ name, consistency: "strong" });
+  const env = k => (globalThis.Netlify && Netlify.env.get(k)) || process.env[k] || "";
+  const api = makeApi({ docs: store("tg-docs"), logs: store("tg-log"), meta: store("tg-meta"), media: store("tg-media"), env });
   return api(req, context);
 };
