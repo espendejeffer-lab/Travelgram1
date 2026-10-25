@@ -1,7 +1,9 @@
 // TravelGram AI assessment assistant (background function, runs up to 15 minutes).
 // The teacher's dashboard calls it with { id } for one submission:
-//   "<uid>~s"        Team Story, speaking (S1), from the recorded audio/video
-//   "<uid>~w~<pid>"  Trip Diary, writing (10W1–10W4) plus a separate photo check
+//   "<uid>~s"        Team Story, speaking, from the recorded audio/video (+ comment questions/answers
+//                    when the class's speaking rubric has an interaction criterion, e.g. 9Sc.02)
+//   "<uid>~w~<pid>"  Trip Diary, writing, plus a separate photo check
+// The rubric is the one chosen for the class in "Change assessment" (rubrics.json "sets").
 // It writes the AI suggestion into the teacher-only "aiassess/<id>" doc as a draft.
 // It never writes "aipub": only the teacher's "Approve and publish" does that.
 import { getStore } from "@netlify/blobs";
@@ -16,10 +18,21 @@ const ID = /^(u_[A-Za-z0-9_-]{22}|[A-Za-z0-9_-]{3,60})~(s|w~[A-Za-z0-9_-]{3,60})
 
 const env = k => (globalThis.Netlify && Netlify.env.get(k)) || process.env[k] || "";
 const isObj = v => v && typeof v === "object" && !Array.isArray(v);
-const snap = v => { const n = Number(v); return n > 0 ? Math.min(4, Math.max(1, Math.round(n * 2) / 2)) : 0; };
-const levelOf = v => RUB.levels[String(v)] || "";
+// Rubric chosen for this class and section: teacher's choice, else the class rubric's default.
+export function rubricSet(section, classEntry, clsCfg) {
+  const sets = RUB.sets[section], d = RUB.defaults[section];
+  const id = [clsCfg && clsCfg.axSets && clsCfg.axSets[section], d[(classEntry && classEntry.rubric) || ""], d["*"]].find(x => x && sets[x]);
+  const r = sets[id];
+  return { ...r, steps: r.steps || RUB.steps, levels: r.levels || RUB.levels, max: r.crit.length * 4 };
+}
+const snap = (v, R) => { const n = Number(v); if (!(n > 0)) return 0; return R.steps.reduce((b, s) => Math.abs(s - n) < Math.abs(b - n) ? s : b, R.steps[0]); };
+const levelOf = (v, R) => R.levels[String(v)] || "";
 const three = a => { const out = (Array.isArray(a) ? a : []).map(x => String(x || "").trim()).filter(Boolean).slice(0, 3); while (out.length < 3) out.push(""); return out; };
-const rubricText = crit => crit.map(c => `${c.code} – ${c.title}\n` + RUB.steps.map(s => `  ${s.toFixed(1)} ${RUB.levels[String(s)]}: ${c.desc[String(s)].join(" ")}`).join("\n")).join("\n\n");
+const rubricText = R => R.crit.map(c => `${c.code} – ${c.title}${c.focus ? ` (focus: ${c.focus})` : ""}\n` + R.steps.map(s => `  ${s} ${R.levels[String(s)]}: ${c.desc[String(s)].join(" ")}`).join("\n")).join("\n\n");
+const scaleText = R => R.steps.every(Number.isInteger) ? "Scores are whole numbers from 1 to 4 (no half points)." : "Scores are 1.0 to 4.0 in 0.5 steps; a half band means the work sits between two bands.";
+const critSchema = R => { const one = { type: "object", required: ["score", "rationale"], properties: { score: { type: "number", minimum: 1, maximum: 4 }, rationale: { type: "string", description: "How the evidence matches this criterion's descriptors, citing the submission." } } };
+  return { type: "object", required: R.crit.map(c => c.id), properties: Object.fromEntries(R.crit.map(c => [c.id, one])) }; };
+const critOut = (R, o) => { const out = {}; for (const c of R.crit) { const x = (o || {})[c.id] || {}, v = snap(x.score, R); out[c.id] = { score: v, level: levelOf(v, R), rationale: String(x.rationale || "") }; } return out; };
 
 async function loadRef(ref, media, origin) {
   if (!ref || typeof ref !== "string") return null;
@@ -59,49 +72,66 @@ async function ask(system, parts, schema) {
 }
 
 const str = { type: "string" }, list3 = { type: "array", items: str, minItems: 3, maxItems: 3 };
-const scoreProp = { type: "number", minimum: 1, maximum: 4, description: "1.0 to 4.0 in 0.5 steps" };
 const COMMON = `You are an assessment ASSISTANT for an English teacher. You only suggest; the teacher reviews, edits and decides what students see.
 Rules:
 - Use ONLY the rubric descriptors supplied. Do not add other criteria (for example, do not mark pronunciation, length or effort unless the descriptors mention it).
-- Scores are 1.0 to 4.0 in 0.5 steps. Choose the band whose descriptors best match the evidence; a half band means the work sits between two bands.
+- Choose the band whose descriptors best match the evidence. Assess each criterion independently.
 - Every strength, improvement and comment must point to something specific in THIS submission (quote or closely paraphrase it). No generic advice.
 - Write feedback for a secondary-school English learner: warm, clear, specific and actionable. Address the student as "you".
 - Never invent evidence. If something cannot be heard, read or seen reliably, say so and add a flag for the teacher.`;
 
-async function speaking(sub, cls, media, origin) {
-  const S = RUB.speaking, flags = [];
+async function speaking(sub, cls, media, origin, S, inter) {
+  const flags = [];
   const f = await loadRef(sub.media, media, origin);
   if (!sub.media) return { unprocessable: "No recording is attached to this Team Story." };
   if (!f) return { unprocessable: "The recording could not be loaded. It may have been removed or the upload did not finish." };
   if (f.tooBig) return { unprocessable: `The recording is ${(f.size / 1048576).toFixed(1)} MB, too large for the AI to process (limit about 14 MB). Please listen and assess it yourself.` };
+  const ic = S.crit.filter(c => c.interaction);
   const system = `${COMMON}
+- ${scaleText(S)}
 
-Task: assess a student's "${S.title}" (Team Stories, skill focus: ${S.skill}) on one criterion:
-${rubricText(S.crit)}
+Task: assess a student's "${S.title}" (Team Stories, skill focus: ${S.skill}) on ${S.crit.length} criteria, maximum ${S.max} points:
+${rubricText(S)}
 
 Listen to the recording itself. Judge the clarity, relevance, development and organisation of the ideas the student communicates, and their descriptions, supporting details, opinions and personal reflections. A transcript helps you cite evidence, but assess what is actually said in the recording, not the written script. The script is context only.
+${ic.length ? `For ${ic.map(c => c.code).join(", ")} (questioning and interaction), use BOTH any questions or interaction in the recording AND the written class interaction supplied below: questions the student asked on classmates' posts, and the student's replies to questions on their own post. If there is little or no interaction evidence, say so in the rationale, score only from what exists, and add a flag for the teacher.` : ""}
 If the recording is silent, mostly unintelligible, mostly music/noise, not in English, or clearly not a student's spoken blogpost, set "intelligible" to false, explain why in "flags", and give your best cautious suggestion only from what can genuinely be heard.
 The file may be a video; assess only the spoken communication.`;
   const ctx = `Class: ${cls}. Project type: ${RUB.projects[sub.cat] || "not stated"}. Title: ${sub.title || "(none)"}. Destination: ${sub.destination || "(none)"}.
 Short description by the student: ${sub.desc || "(none)"}
 Written script (context only, do not assess it): ${sub.script ? sub.script.slice(0, 4000) : "(none submitted)"}
+${ic.length ? `CLASS INTERACTION EVIDENCE (written comments on TravelGram):\n${inter}` : ""}
 The recording follows.`;
-  const schema = { type: "object", required: ["intelligible", "transcript", "score", "level", "evidence", "strengths", "improvements", "feedback", "flags"], properties: {
+  const schema = { type: "object", required: ["intelligible", "transcript", "criteria", "strengths", "improvements", "feedback", "flags"], properties: {
     intelligible: { type: "boolean" }, transcript: { type: "string", description: "Close transcript of what the student says; mark unclear parts as [unclear]." },
-    score: scoreProp, level: { type: "string", enum: Object.values(RUB.levels) },
-    evidence: { type: "string", description: "Why this band fits: compare the recording with the descriptors, citing moments from the recording." },
-    strengths: list3, improvements: list3, feedback: { type: "string", description: "Overall feedback paragraph for the student." },
-    flags: { type: "array", items: str, description: "Problems the teacher should check (unclear audio, missing content, possible not-own work). Empty if none." } } };
+    criteria: critSchema(S), strengths: list3, improvements: list3, feedback: { type: "string", description: "Overall feedback paragraph for the student." },
+    flags: { type: "array", items: str, description: "Problems the teacher should check (unclear audio, missing content, little interaction evidence). Empty if none." } } };
   const { model, out } = await ask(system, [{ text: ctx }, part(f)], schema);
-  const score = snap(out.score);
+  const criteria = critOut(S, out.criteria), total = S.crit.reduce((n, c) => n + criteria[c.id].score, 0);
   if (!out.intelligible) flags.push("The AI could not reliably hear or understand all of the recording. Listen before approving.");
-  return { model, transcript: String(out.transcript || ""), score, level: levelOf(score), evidence: String(out.evidence || ""),
+  return { model, set: S.id, transcript: String(out.transcript || ""), criteria, total, level: S.crit.length === 1 ? criteria[S.crit[0].id].level : "",
+    evidence: S.crit.length === 1 ? criteria[S.crit[0].id].rationale : "",
     strengths: three(out.strengths), improvements: three(out.improvements), feedback: String(out.feedback || ""),
     flags: [...flags, ...(out.flags || []).map(String).filter(Boolean)], intelligible: !!out.intelligible };
 }
 
-async function writing(it, cls, media, origin) {
-  const W = RUB.writing, flags = [];
+// Questions the student asked on classmates' posts, and their replies on their own Team Story / Trip Diaries.
+async function interaction(docs, uid, read) {
+  const author = pid => String(pid || "").split("~")[0];
+  const all = [];
+  const { blobs } = await docs.list({ prefix: "comments/" });
+  for (let i = 0; i < blobs.length; i += 25) (await Promise.all(blobs.slice(i, i + 25).map(b => read(b.key)))).forEach(c => c && all.push({ ...c }));
+  const pc = await docs.list({ prefix: "pcomments/" });
+  for (const b of pc.blobs) { const d = await read(b.key); Object.values((d && d.items) || {}).forEach(c => { if (c && (c.status === "live" || !c.status)) all.push({ ...c, authorUid: b.key.slice(10) }); }); }
+  all.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const line = c => `- ${String(c.text || "").replace(/\s+/g, " ").slice(0, 300)}`;
+  const asked = all.filter(c => c.authorUid === uid && author(c.postId) !== uid).slice(0, 30);
+  const mine = all.filter(c => author(c.postId) === uid).slice(0, 40);
+  return `Questions/comments the student wrote on classmates' posts (${asked.length}):\n${asked.map(line).join("\n") || "(none)"}\n\nConversation on the student's own posts, in order (${mine.length}):\n${mine.map(c => `${c.authorUid === uid ? "STUDENT" : "Classmate " + (c.name || "")}: ${String(c.text || "").replace(/\s+/g, " ").slice(0, 300)}`).join("\n") || "(none)"}`;
+}
+
+async function writing(it, cls, media, origin, W) {
+  const flags = [];
   const story = String(it.story || "").trim();
   if (!story) return { unprocessable: "This Trip Diary has no written description to assess." };
   const gallery = (Array.isArray(it.gallery) && it.gallery.length ? it.gallery : it.photo ? [{ ref: it.photo, kind: "image" }] : []).filter(g => g && g.ref);
@@ -115,8 +145,10 @@ async function writing(it, cls, media, origin) {
   const det = it.details && Object.keys(it.details).length ? JSON.stringify(it.details).slice(0, 1500) : "(none)";
   const system = `${COMMON}
 
-Task: assess a student's "${W.title}" (Trip Diary, skill focus: ${W.skill}). Assess the written description on four criteria, each INDEPENDENTLY, using these descriptors:
-${rubricText(W.crit)}
+- ${scaleText(W)}
+
+Task: assess a student's "${W.title}" (Trip Diary, skill focus: ${W.skill}). Assess the written description on ${W.crit.length} criteria, each INDEPENDENTLY, maximum ${W.max} points, using these descriptors:
+${rubricText(W)}
 
 Then, SEPARATELY (this is not part of the writing score), check how the photographs relate to the writing:
 - Are the photos relevant to the travel experience, food review or adventure described?
@@ -131,9 +163,8 @@ WRITTEN DESCRIPTION TO ASSESS:
 ${story.slice(0, 8000)}
 """
 ${photos.length ? `${photos.length} photo(s) follow, each labelled with its number.` : "No photos were provided."}`;
-  const crit = { type: "object", required: ["score", "rationale"], properties: { score: scoreProp, rationale: { type: "string", description: "How the text matches this criterion's descriptors, quoting the student's writing." } } };
   const schema = { type: "object", required: ["criteria", "strengths", "improvements", "feedback", "alignment", "flags"], properties: {
-    criteria: { type: "object", required: W.crit.map(c => c.id), properties: Object.fromEntries(W.crit.map(c => [c.id, crit])) },
+    criteria: critSchema(W),
     strengths: list3, improvements: list3, feedback: { type: "string", description: "Overall feedback paragraph for the student about their writing." },
     alignment: { type: "object", required: ["status", "summary", "photos", "concerns", "studentFeedback"], properties: {
       status: { type: "string", enum: ["consistent", "possible_mismatch", "unclear", "no_photos"] },
@@ -143,13 +174,12 @@ ${photos.length ? `${photos.length} photo(s) follow, each labelled with its numb
       studentFeedback: { type: "string", description: "One or two sentences for the student about how well their photos support their writing." } } },
     flags: { type: "array", items: str, description: "Problems the teacher should check. Empty if none." } } };
   const { model, out } = await ask(system, [{ text: ctx }, ...photos.flatMap(f => [{ text: `Photo ${f.n}:` }, part(f)])], schema);
-  const criteria = {};
-  for (const c of W.crit) { const x = (out.criteria || {})[c.id] || {}, s = snap(x.score); criteria[c.id] = { score: s, level: levelOf(s), rationale: String(x.rationale || "") }; }
+  const criteria = critOut(W, out.criteria);
   const al = isObj(out.alignment) ? out.alignment : {};
   const status = photos.length ? (["consistent", "possible_mismatch", "unclear"].includes(al.status) ? al.status : "unclear") : "no_photos";
   if (status === "possible_mismatch") flags.unshift("Possible mismatch between the photos and the writing. Check the photo notes.");
   if (status === "unclear") flags.unshift("The AI could not reliably interpret the photos. Check them yourself.");
-  return { model, criteria, total: W.crit.reduce((n, c) => n + criteria[c.id].score, 0), strengths: three(out.strengths), improvements: three(out.improvements),
+  return { model, set: W.id, criteria, total: W.crit.reduce((n, c) => n + criteria[c.id].score, 0), strengths: three(out.strengths), improvements: three(out.improvements),
     feedback: String(out.feedback || ""), flags: [...flags, ...(out.flags || []).map(String).filter(Boolean)],
     alignment: { status, summary: String(al.summary || ""), photos: (al.photos || []).slice(0, MAX_PHOTOS).map(p => ({ n: Number(p.n) || 0, seen: String(p.seen || ""), fit: String(p.fit || "") })),
       concerns: (al.concerns || []).map(String).filter(Boolean), studentFeedback: String(al.studentFeedback || "") } };
@@ -157,10 +187,9 @@ ${photos.length ? `${photos.length} photo(s) follow, each labelled with its numb
 
 // The teacher's editable working copy, started from the AI suggestion.
 function curFrom(type, ai) {
-  if (type === "speak") return { score: ai.score || 0, level: ai.level || "", strengths: ai.strengths || three([]), improvements: ai.improvements || three([]), feedback: ai.feedback || "" };
-  const scores = {}; RUB.writing.crit.forEach(c => { scores[c.id] = (ai.criteria && ai.criteria[c.id] && ai.criteria[c.id].score) || 0; });
-  return { scores, strengths: ai.strengths || three([]), improvements: ai.improvements || three([]), feedback: ai.feedback || "",
-    alignNote: (ai.alignment && ai.alignment.studentFeedback) || "", alignScore: 0 };
+  const scores = Object.fromEntries(Object.entries(ai.criteria || {}).map(([k, v]) => [k, v.score || 0]));
+  const base = { set: ai.set, scores, strengths: ai.strengths || three([]), improvements: ai.improvements || three([]), feedback: ai.feedback || "" };
+  return type === "speak" ? { ...base, level: ai.level || "" } : { ...base, alignNote: (ai.alignment && ai.alignment.studentFeedback) || "", alignScore: 0 };
 }
 
 export default async (req) => {
@@ -181,9 +210,11 @@ export default async (req) => {
     const src = type === "speak" ? await read("subs/" + uid) : ((await read("psubs/" + uid)) || {}).items?.[pid];
     if (!src) { await save({ job: { state: "error", at: now, error: "The submission could not be found." } }); return; }
     const classes = (await read("config/classes")) || {}, k = src.k || ((await read("psubs/" + uid)) || {}).k || "s10";
-    const cls = ((classes.list || []).find(c => c.k === k) || {}).name || k;
+    const entry = (classes.list || []).find(c => c.k === k) || { k, rubric: { "9e6": "s9" }[k] || "" }, cls = entry.name || k;
+    const R = rubricSet(type === "speak" ? "speaking" : "writing", entry, await read("config/" + (k === "s10" ? "class" : "class-" + k)));
     const origin = new URL(req.url).origin;
-    const res = type === "speak" ? await speaking(src, cls, media, origin) : await writing(src, cls, media, origin);
+    const res = type === "speak" ? await speaking(src, cls, media, origin, R, R.crit.some(c => c.interaction) ? await interaction(docs, uid, read) : "")
+      : await writing(src, cls, media, origin, R);
     if (res.unprocessable) {
       await save({ k, uid, type, pid, job: { state: "flagged", at: Date.now(), error: res.unprocessable } });
       return;
