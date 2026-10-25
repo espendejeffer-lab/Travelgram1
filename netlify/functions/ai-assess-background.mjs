@@ -7,7 +7,7 @@
 import { getStore } from "@netlify/blobs";
 import { GoogleGenAI } from "@google/genai";
 import { adminAuth, logKey } from "./api.mjs";
-import RUB from "../../site/ai-rubrics.json" with { type: "json" };
+import RUB from "../../site/rubrics.json" with { type: "json" };
 
 const MODELS = ["gemini-3.1-pro-preview", "gemini-2.5-pro"];
 const MAX_INLINE = 14 * 1024 * 1024;     // inline request limit, after base64

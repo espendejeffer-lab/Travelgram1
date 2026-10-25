@@ -2132,7 +2132,7 @@ function gradePanel() {
    The AI writes suggestions into "aiassess/<id>" (teacher only). Students only ever read "aipub/<uid>",
    which is written by the teacher's "Approve and publish" button and nothing else. */
 let AIR = null;
-fetch("/ai-rubrics.json", { cache: "no-store" }).then(r => r.json()).then(j => { AIR = j; paint(true); }).catch(() => { });
+fetch("/rubrics.json", { cache: "no-store" }).then(r => r.json()).then(j => { AIR = j; paint(true); }).catch(() => { });
 const AX_RUN_MS = 10 * 60 * 1000;
 const axType = id => /~s$/.test(id) ? "speak" : "write";
 const axIds = id => { const [uid, t, pid] = id.split("~"); return { uid, type: t === "s" ? "speak" : "write", pid: pid || "" }; };
@@ -2323,16 +2323,18 @@ function axPubPanel() {
   const P = S.myPub; if (!P || !AIR || kOf(P) !== S.klass) return "";
   const sp = P.speak, wr = Object.values(P.write || {}).filter(Boolean).sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
   if (!sp && !wr.length) return "";
+  const rk = P.rank || {};
   const notes = r => `${(r.strengths || []).filter(Boolean).length ? `<div class="note"><b>Strengths</b><ul class="ul">${r.strengths.filter(Boolean).map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>` : ""}
     ${(r.improvements || []).filter(Boolean).length ? `<div class="note"><b>Areas for improvement</b><ul class="ul">${r.improvements.filter(Boolean).map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>` : ""}
     ${r.feedback ? `<div class="note"><b>Teacher feedback</b><p style="margin-top:4px">${esc(r.feedback)}</p></div>` : ""}`;
   const bar = (lab, v, sub) => `<div class="crit-row"><div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>${lab}</b><b style="white-space:nowrap">${axF(v)} / 4</b></div><div class="meter"><i style="width:${(Number(v) || 0) * 25}%"></i></div>${sub}</div>`;
-  const speak = sp ? `<div class="panel stack grade"><div class="row" style="justify-content:space-between;align-items:flex-end"><div><span class="lbl">Team Stories · Speaking · ${esc(AIR.speaking.title)}</span><h2>🎙 ${esc(sp.title || "My team story")}</h2></div><div class="bigscore">${axF(sp.score)}<span class="small muted" style="font-size:1rem"> / 4</span></div></div>
+  const speak = sp ? `<div class="panel stack grade">${axRankRibbon(rk.speak, "Team Stories speaking")}<div class="row" style="justify-content:space-between;align-items:flex-end"><div><span class="lbl">Team Stories · Speaking · ${esc(AIR.speaking.title)}</span><h2>🎙 ${esc(sp.title || "My team story")}</h2></div><div class="bigscore">${axF(sp.score)}<span class="small muted" style="font-size:1rem"> / 4</span></div></div>
     ${bar(`S1 · ${esc(sp.level || axLevel(sp.score))}`, sp.score, axUl(sp.descriptors || axDesc(AIR.speaking.crit[0], sp.score)))}${notes(sp)}</div>` : "";
   const write = wr.map(r => `<div class="panel stack grade"><div class="row" style="justify-content:space-between;align-items:flex-end"><div><span class="lbl">Trip Diary · Writing · ${esc(AIR.writing.title)}</span><h2>✍️ ${esc(r.title || "My trip diary")}</h2></div><div class="bigscore">${fmtScore(r.total)}<span class="small muted" style="font-size:1rem"> / 16</span></div></div>
     <div class="scores">${AIR.writing.crit.map(c => bar(`${esc(c.code)} ${esc(c.title)}`, (r.scores || {})[c.id], `<p class="small muted">${esc(axLevel((r.scores || {})[c.id]))}: ${esc(axDesc(c, (r.scores || {})[c.id]).join(" "))}</p>`)).join("")}</div>
     ${notes(r)}${r.photo && (r.photo.note || r.photo.score) ? `<div class="note"><b>📷 Your photos and your writing</b>${r.photo.score ? ` <span class="tag">${axF(r.photo.score)} / 4 · not part of the total</span>` : ""}${r.photo.note ? `<p style="margin-top:4px">${esc(r.photo.note)}</p>` : ""}</div>` : ""}</div>`).join("");
-  return `<div class="stack" id="my-assess">${speak}${write}</div>`;
+  const wrib = wr.length && rk.write && rk.write.rank ? `<div class="panel grade">${axRankRibbon(rk.write, "Trip Diaries writing")}</div>` : "";
+  return `<div class="stack" id="my-assess">${speak}${wrib}${write}</div>`;
 }
 const axDrafts = type => Object.values(S.ax).filter(x => x && x.type === type && x.ai && x.status !== "published" && x.status !== "reviewed").length;
 const axActs = {
@@ -2358,6 +2360,7 @@ const axActs = {
     }
     await upsert("aipub/" + uid, type === "speak" ? { k: S.klass, speak: res } : { k: S.klass, write: { [pid]: res } });
     await upsert("aiassess/" + id, { uid, type, pid, k: S.klass, cur, pub: cur, status: "published", approvedAt: at, publishedAt: at, history: [{ action: "approved and published", at, cur }, ...(x.history || [])].slice(0, 20) });
+    if (axRankAt(type)) await axApplyRanks(type, true, { ...S.ax, [id]: { ...x, uid, type, pid, pub: cur, status: "published", publishedAt: at } });
     delete S.axEdits[id]; S.axOpen = id;
     toast(`Published. ${(S.people[uid] || {}).name || "The student"} can now see this result.`);
   },
@@ -2365,11 +2368,68 @@ const axActs = {
     const id = b.dataset.id, { uid, type, pid } = axIds(id), x = S.ax[id] || {}, at = Date.now();
     await upsert("aipub/" + uid, type === "speak" ? { k: S.klass, speak: null } : { k: S.klass, write: { [pid]: null } });
     await upsert("aiassess/" + id, { status: "reviewed", publishedAt: 0, history: [{ action: "unpublished", at, cur: x.pub || x.cur }, ...(x.history || [])].slice(0, 20) });
+    if (axRankAt(type)) await axApplyRanks(type, true, { ...S.ax, [id]: { ...x, uid, type, pid, status: "reviewed" } });
     S.axOpen = id; toast("Hidden from the student. The assessment stays as Teacher Reviewed.");
   }
 };
+/* ---------- Separate rankings: Team Stories (speaking, out of 4) and Trip Diaries (writing, out of 16) ----------
+   Only teacher-published results count. Speaking uses the latest published S1 score; writing uses the average
+   published total of the student's Trip Diaries. Equal scores share a rank. Ranks reach students only after
+   the teacher releases them, and only through the student's own "aipub" doc. */
+const AXR = { speak: { max: 4, name: "Team Stories · Speaking", unit: "S1" }, write: { max: 16, name: "Trip Diaries · Writing", unit: "10W1–10W4" } };
+function axRankList(type, ax = S.ax) {
+  const best = {};
+  Object.values(ax).forEach(x => {
+    if (!x || x.type !== type || x.status !== "published" || !x.pub) return;
+    const p = S.people[x.uid]; if (!p || isTestP(p)) return;
+    const key = p.sid || x.uid, at = x.publishedAt || 0;
+    const b = best[key] = best[key] || { uid: x.uid, p, at: 0, scores: [] };
+    const v = type === "speak" ? Number(x.pub.score) || 0 : axTotal(x.pub.scores);
+    if (type === "speak") { if (at >= b.at) b.scores = [v]; } else b.scores.push(v);
+    if (at >= b.at) Object.assign(b, { uid: x.uid, p, at });
+  });
+  const arr = Object.values(best).map(e => ({ ...e, score: Math.round(e.scores.reduce((n, v) => n + v, 0) / e.scores.length * 10) / 10 }))
+    .sort((a, b) => b.score - a.score || String(a.p.name || "").localeCompare(String(b.p.name || "")));
+  let prev = null;
+  arr.forEach((e, i) => { e.rank = prev && prev.score === e.score ? prev.rank : i + 1; prev = e; });
+  return arr;
+}
+const axRankAt = type => Number(((S.cls && S.cls.axRank) || {})[type]) || 0;
+async function axApplyRanks(type, show, ax = S.ax) {
+  const N = rankTopFor(), arr = axRankList(type, ax), ranked = new Map(arr.map(e => [e.uid, e])), at = Date.now();
+  const uids = new Set([...arr.map(e => e.uid), ...Object.values(ax).filter(x => x && x.type === type).map(x => x.uid)]);
+  const jobs = [...uids].map(uid => { const e = ranked.get(uid);
+    return upsert("aipub/" + uid, { k: S.klass, rank: { [type]: show && e && e.rank <= N ? { rank: e.rank, of: arr.length, top: N, at } : null } }); });
+  for (let i = 0; i < jobs.length; i += 10) await Promise.all(jobs.slice(i, i + 10));
+  await upsert(cfgPath("class"), { axRank: { [type]: show ? at : 0 } });
+  return arr;
+}
+function axRankBody(type) {
+  if (!AIR) return `<div class="panel"><p class="muted">Loading…</p></div>`;
+  const R0 = AXR[type], arr = axRankList(type), N = rankTopFor(), rel = axRankAt(type);
+  const subs = type === "speak" ? Object.keys(S.subs).length : Object.values(S.psubs).reduce((n, d) => n + Object.values((d && d.items) || {}).filter(i => i && !["removed", "rejected"].includes(i.status)).length, 0);
+  const ctl = rel
+    ? `<div class="relbox"><span class="tag st-ok">✓ Ranks shown to students · ${esc(axWhen(rel))}</span><button class="btn ghost sm" data-act="axrankshow" data-type="${type}">Refresh ranks</button><button class="btn danger sm" data-act="axrankhide" data-type="${type}" data-confirm="Tap again to hide">Hide ranks</button></div>
+       <p class="small muted">The top ${N} see their ${esc(R0.name)} rank on My Trip Diary. Everyone else sees only their published score. Ranks update by themselves when you publish or unpublish a result.</p>`
+    : `<div class="relbox"><button class="btn hot" data-act="axrankshow" data-type="${type}" data-confirm="Tap again to show ranks"${arr.length ? "" : " disabled"}>🏆 Show ranks to the top ${N}</button></div><p class="small muted">🔒 Hidden from students. Only you can see this ranking until you show it.</p>`;
+  const rows = arr.map(e => `<tr class="${e.rank <= N ? "topn" : ""}"><td><span class="rankpill">${e.rank}</span></td><td><b>${esc(e.p.name || "Student")}</b><br><span class="small muted">${esc(e.p.realName || "")}${e.p.team ? ` · Team ${esc(e.p.team)}` : ""}</span></td>
+    ${type === "speak" ? `<td>${esc(axLevel(e.score))}</td>` : `<td class="num">${e.scores.length}</td>`}<td class="num tot">${type === "speak" ? axF(e.score) : fmtScore(e.score)}<span class="small muted">/${R0.max}</span></td>
+    <td>${e.rank <= N ? `<span class="tag ${rel ? "st-ok" : ""}">${rel ? "🏆 Sees rank" : "Will see rank"}</span>` : `<span class="small muted">Score only</span>`}</td></tr>`).join("");
+  const table = arr.length ? `<div class="tbl-wrap"><table class="results"><thead><tr><th>Rank</th><th>Student</th>${type === "speak" ? "<th>Level</th>" : "<th>Trip Diaries<span class=\"small\">published</span></th>"}<th>${type === "speak" ? "S1 score" : "Average total"}<span class="small">out of ${R0.max}</span></th><th>Rank shown</th></tr></thead><tbody>${rows}</tbody></table></div>`
+    : `<p class="small muted">The ranking appears once you publish the first ${type === "speak" ? "speaking" : "writing"} result.</p>`;
+  return `<div class="stack"><div class="panel stack"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><span class="lbl">${esc(clsName())} · ${esc(R0.name)} · ${esc(R0.unit)} · out of ${R0.max}</span><h2>🏆 ${type === "speak" ? "Speaking" : "Writing"} ranking</h2></div><span class="tag">${arr.length} ranked · ${subs} submission${subs === 1 ? "" : "s"}</span></div>
+    <p class="small muted">Only published results count: drafts and unpublished scores are left out. ${type === "speak" ? "Uses each student's published S1 score." : "Uses the average published total (10W1–10W4) of each student's Trip Diaries."} Highest first; equal scores share a rank. This ranking is separate from the ${type === "speak" ? "writing" : "speaking"} ranking and the two are never combined. Test accounts are not ranked.</p>
+    ${ctl}${table}<p class="small muted">Highlighted rows are the top ${N} (change this in the Class tab).</p></div></div>`;
+}
+const axRankActs = {
+  async axrankshow(b) { const arr = await axApplyRanks(b.dataset.type, true); toast(`Ranks shown to the top ${Math.min(rankTopFor(), arr.length)}.`); },
+  async axrankhide(b) { await axApplyRanks(b.dataset.type, false); toast("Ranks hidden. Students see only their published score."); }
+};
+function axRankRibbon(r, label) {
+  return r && r.rank ? `<div class="rank-ribbon"><span class="medal" aria-hidden="true">${medal(r.rank)}</span><div><span class="lbl" style="color:inherit">${esc(label)} ranking · ${esc(clsName())}</span><b>Rank ${r.rank} of ${r.of || "the class"}</b><span class="small">You are in the top ${r.top || rankTopFor()} in your class. Well done!</span></div></div>` : "";
+}
 function teacherHtml() {
-  const tabs = [["queue", `Queue${pendingCount() ? ` <span class="badge-n">${pendingCount()}</span>` : ""}`], ["assess", "Assess"], ["aispeak", `🎙 Team Stories · Speaking AI${axDrafts("speak") ? ` <span class="badge-n">${axDrafts("speak")}</span>` : ""}`], ["aiwrite", `✍️ Trip Diaries · Writing AI${axDrafts("write") ? ` <span class="badge-n">${axDrafts("write")}</span>` : ""}`], ["rank", `🏆 Ranking${rankReady() ? ` <span class="badge-n">Ready</span>` : ""}`], ["picks", "Team Picks"], ["posts", "Posts"], ["students", "Students"], ["class", "Class"]];
+  const tabs = [["queue", `Queue${pendingCount() ? ` <span class="badge-n">${pendingCount()}</span>` : ""}`], ["assess", "Assess"], ["aispeak", `🎙 Team Stories · Speaking AI${axDrafts("speak") ? ` <span class="badge-n">${axDrafts("speak")}</span>` : ""}`], ["aiwrite", `✍️ Trip Diaries · Writing AI${axDrafts("write") ? ` <span class="badge-n">${axDrafts("write")}</span>` : ""}`], ["aisrank", "🏆 Speaking ranking"], ["aiwrank", "🏆 Writing ranking"], ["rank", `🏆 Ranking${rankReady() ? ` <span class="badge-n">Ready</span>` : ""}`], ["picks", "Team Picks"], ["posts", "Posts"], ["students", "Students"], ["class", "Class"]];
   const head = `<div class="feed-head"><div><span class="lbl">Teacher dashboard · ${esc(clsName())}</span><h1>Control tower</h1></div><button class="btn teal" data-act="showcase">${ico("desk")} Start Showcase</button></div>
     <div class="ttabs">${tabs.map(([k, l]) => `<button class="chip" data-act="ttab" data-v="${k}" aria-pressed="${S.tTab === k}">${l}</button>`).join("")}</div>`;
   let body = "";
@@ -2417,6 +2477,10 @@ function teacherHtml() {
     body = axSpeakBody();
   } else if (S.tTab === "aiwrite") {
     body = axWriteBody();
+  } else if (S.tTab === "aisrank") {
+    body = axRankBody("speak");
+  } else if (S.tTab === "aiwrank") {
+    body = axRankBody("write");
   } else if (S.tTab === "students") {
     const st = { pending: "Waiting", approved: "On feed", returned: "Sent back", rejected: "Rejected", removed: "Removed" };
     const roster = (S.roster && S.roster.students) || [], ids = new Set(roster.map(r => r.id)), byS = {};
@@ -2688,8 +2752,8 @@ const A = {
     toast("Post deleted"); if (route() === "post-" + id) go("feed");
   }
 };
-Object.assign(A, axActs);
-const CONFIRM = new Set(["axre", "axpub", "axunpub", "rankrelease", "rankhide", "ghide", "logout", "delclass", "delpost", "delcmt", "reject", "creject", "preject", "delpcmt", "pcreject"]);
+Object.assign(A, axActs, axRankActs);
+const CONFIRM = new Set(["axre", "axpub", "axunpub", "axrankshow", "axrankhide", "rankrelease", "rankhide", "ghide", "logout", "delclass", "delpost", "delcmt", "reject", "creject", "preject", "delpcmt", "pcreject"]);
 document.addEventListener("click", async e => {
   const b = e.target.closest("[data-act]"); if (!b) return;
   const act = b.dataset.act; if (!A[act]) return;
