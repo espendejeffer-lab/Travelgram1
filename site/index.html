@@ -1224,7 +1224,7 @@ const S = {
   cls: null, feed: {}, posts: [], comments: [], reacts: {},
   me: null, mySub: null, myC: null, subs: {}, csubs: {}, people: {},
   loaded: {}, filter: "all", tTab: "queue", draft: null, sending: false,
-  pcomments: {}, myP: null, psubs: {}, roster: null, grades: {}, gdrafts: {}, myGrade: null, aOpen: null, aEdits: {}, ax: {}, axEdits: {}, axOpen: null, myPub: null, catF: "all", guideTab: "blog", feedTab: "team", pdraft: null, ptEdit: null, ptDone: false
+  pcomments: {}, myP: null, psubs: {}, roster: null, grades: {}, gdrafts: {}, myGrade: null, aOpen: null, aEdits: {}, ax: {}, axEdits: {}, axOpen: null, myPub: null, axRubOpen: null, catF: "all", guideTab: "blog", feedTab: "team", pdraft: null, ptEdit: null, ptDone: false
 };
 const teacherMode = () => S.isTeacher && !S.viewAsStudent;
 const curUid = () => Store.mode === "local" ? (S.viewAsStudent ? "demo-student" : "demo-teacher") : S.uid;
@@ -1283,7 +1283,7 @@ function applyKlassPack() {
 }
 function setKlass(k) {
   S.klass = k; applyKlassPack();
-  Object.assign(S, { cls: null, feed: {}, posts: [], comments: [], reacts: {}, pcomments: {}, subs: {}, csubs: {}, psubs: {}, people: {}, roster: null, grades: {}, gdrafts: {}, myGrade: null, aOpen: null, ax: {}, axEdits: {}, axOpen: null, myPub: null,
+  Object.assign(S, { cls: null, feed: {}, posts: [], comments: [], reacts: {}, pcomments: {}, subs: {}, csubs: {}, psubs: {}, people: {}, roster: null, grades: {}, gdrafts: {}, myGrade: null, aOpen: null, ax: {}, axEdits: {}, axOpen: null, myPub: null, axRubOpen: null,
     draft: null, pdraft: null, ptEdit: null, ptDone: false, editing: false, filter: "all", catF: "all", feedTab: "team", guideTab: "blog" });
 }
 
@@ -1347,6 +1347,7 @@ function busy(el) {
 }
 function doPaint() {
   if (!S.ready) return;
+  axApplyRub();
   chrome();
   const view = $("#view");
   const { key, html } = viewHtml();
@@ -2131,20 +2132,32 @@ function gradePanel() {
 /* ---------- AI-assisted assessment: Team Stories (speaking, S1) and Trip Diaries (writing, 10W1–10W4) ----------
    The AI writes suggestions into "aiassess/<id>" (teacher only). Students only ever read "aipub/<uid>",
    which is written by the teacher's "Approve and publish" button and nothing else. */
-let AIR = null;
-fetch("/rubrics.json", { cache: "no-store" }).then(r => r.json()).then(j => { AIR = j; paint(true); }).catch(() => { });
+// rubrics.json holds several rubrics per section ("sets"); each class uses the one chosen in
+// "Change assessment" (config class doc, axSets), else the default for the class's rubric.
+let AIR0 = null, AIR = null;
+fetch("/rubrics.json", { cache: "no-store" }).then(r => r.json()).then(j => { AIR0 = j; axApplyRub(); paint(true); }).catch(() => { });
+const axFill = r => ({ ...r, steps: r.steps || AIR0.steps, levels: r.levels || AIR0.levels, max: r.crit.length * 4 });
+const axSetId = section => { const sets = AIR0.sets[section], d = AIR0.defaults[section], c = classOf(S.klass) || {};
+  return [S.cls && S.cls.axSets && S.cls.axSets[section], d[c.rubric || rubricKey()], d["*"]].find(x => x && sets[x]); };
+function axApplyRub() {
+  if (!AIR0 || !S.klass) return;
+  AIR = { projects: AIR0.projects, speaking: axFill(AIR0.sets.speaking[axSetId("speaking")]), writing: axFill(AIR0.sets.writing[axSetId("writing")]) };
+}
+const axR = type => type === "speak" ? AIR.speaking : AIR.writing;
 const AX_RUN_MS = 10 * 60 * 1000;
 const axType = id => /~s$/.test(id) ? "speak" : "write";
 const axIds = id => { const [uid, t, pid] = id.split("~"); return { uid, type: t === "s" ? "speak" : "write", pid: pid || "" }; };
-const axLevel = v => (AIR && AIR.levels[String(Number(v))]) || "";
+const axLevel = (v, R) => (R && R.levels[String(Number(v))]) || "";
 const axDesc = (c, v) => (c && Number(v) ? c.desc[String(Number(v))] : null) || [];
-const axF = v => Number(v) ? Number(v).toFixed(1) : "—";
-const axTotal = sc => AIR.writing.crit.reduce((n, c) => n + (Number((sc || {})[c.id]) || 0), 0);
+const axF = v => Number(v) ? fmtScore(Number(v)) : "—";
+const axTotal = (sc, R = AIR.writing) => R.crit.reduce((n, c) => n + (Number((sc || {})[c.id]) || 0), 0);
 const axRunning = x => !!(x && x.job && x.job.state === "running" && Date.now() - (x.job.at || 0) < AX_RUN_MS);
 const axWhen = t => t ? new Date(t).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
-const axBlank = type => type === "speak" ? { score: 0, level: "", strengths: ["", "", ""], improvements: ["", "", ""], feedback: "" }
+const axBlank = type => type === "speak" ? { scores: {}, level: "", strengths: ["", "", ""], improvements: ["", "", ""], feedback: "" }
   : { scores: {}, strengths: ["", "", ""], improvements: ["", "", ""], feedback: "", alignNote: "", alignScore: 0 };
-const axCur = id => S.axEdits[id] || (S.ax[id] && S.ax[id].cur) || axBlank(axType(id));
+const axNorm = o => o && !o.scores && o.score ? { ...o, scores: { s1: o.score } } : o;   // drafts saved before multi-criterion speaking
+const axCur = id => S.axEdits[id] || axNorm(S.ax[id] && S.ax[id].cur) || axBlank(axType(id));
+const axAiScores = ai => ai && ai.criteria ? Object.fromEntries(Object.entries(ai.criteria).map(([k, v]) => [k, v.score])) : ai && ai.score ? { s1: ai.score } : {};
 const axSame = (a, b) => JSON.stringify(a ?? "").trim() === JSON.stringify(b ?? "").trim();
 const axDirty = x => !!(x && x.pub && x.cur && !axSame(x.pub, x.cur));
 function axStatus(x) {
@@ -2161,11 +2174,11 @@ function axMark(ai, aiv, curv, fmt = v => v) {
   if (axSame(aiv, curv)) return `<span class="tag aitag">✨ AI suggestion</span>`;
   return `<span class="tag edtag">✎ Edited by teacher${fmt(aiv) !== "" && !Array.isArray(aiv) ? ` · AI said ${esc(fmt(aiv))}` : ""}</span>`;
 }
-const axOpts = (v, none = "Score") => `<option value="">${none}</option>` + AIR.steps.map(s => `<option value="${s}"${Number(v) === s ? " selected" : ""}>${s.toFixed(1)} · ${AIR.levels[String(s)]}</option>`).join("");
+const axOpts = (v, none, R) => `<option value="">${none}</option>` + R.steps.map(s => `<option value="${s}"${Number(v) === s ? " selected" : ""}>${fmtScore(s)} · ${esc(R.levels[String(s)])}</option>`).join("");
 const axUl = arr => arr.length ? `<ul class="ul small">${arr.map(d => `<li>${esc(d)}</li>`).join("")}</ul>` : "";
-function axRubric(crit) {
-  return `<details class="box"><summary class="lbl" style="cursor:pointer">📋 Rubric descriptors</summary>${crit.map(c => `<div class="stack" style="gap:6px;margin-top:10px"><b>${esc(c.code)} – ${esc(c.title)}</b>
-    <div class="tbl-wrap"><table class="results axrub"><thead><tr><th>Score</th><th>Level</th><th>Descriptors</th></tr></thead><tbody>${AIR.steps.map(s => `<tr><td class="num"><b>${s.toFixed(1)}</b></td><td>${esc(AIR.levels[String(s)])}</td><td>${axUl(c.desc[String(s)])}</td></tr>`).join("")}</tbody></table></div></div>`).join("")}</details>`;
+function axRubric(R) {
+  return `<details class="box"><summary class="lbl" style="cursor:pointer">📋 Rubric descriptors</summary>${R.crit.map(c => `<div class="stack" style="gap:6px;margin-top:10px"><b>${esc(c.code)} – ${esc(c.title)}</b>${c.focus ? `<span class="small muted">Focus: ${esc(c.focus)} · max 4</span>` : ""}
+    <div class="tbl-wrap"><table class="results axrub"><thead><tr><th>Score</th><th>Level</th><th>Descriptors</th></tr></thead><tbody>${R.steps.map(s => `<tr><td class="num"><b>${fmtScore(s)}</b></td><td>${esc(R.levels[String(s)])}</td><td>${axUl(c.desc[String(s)])}</td></tr>`).join("")}</tbody></table></div></div>`).join("")}</details>`;
 }
 function axFlags(x) {
   const f = [...((x && x.ai && x.ai.flags) || [])];
@@ -2178,9 +2191,8 @@ function axFlags(x) {
 }
 function axSum(type, o) {
   if (!o) return "";
-  if (type === "speak") return `S1 ${axF(o.score)}${o.level ? ` (${esc(o.level)})` : ""}`;
-  const sc = o.criteria ? Object.fromEntries(Object.entries(o.criteria).map(([k, v]) => [k, v.score])) : (o.scores || {});
-  return AIR.writing.crit.map(c => `${c.code} ${axF(sc[c.id])}`).join(" · ") + ` · Total ${fmtScore(axTotal(sc))}/16`;
+  const R = axR(type), sc = o.criteria ? axAiScores(o) : (axNorm(o).scores || {});
+  return R.crit.map(c => `${esc(c.code)} ${axF(sc[c.id])}`).join(" · ") + ` · Total ${fmtScore(axTotal(sc, R))}/${R.max}${o.level ? ` (${esc(o.level)})` : ""}`;
 }
 function axHistory(x, type) {
   if (!x || (!x.ai && !(x.history || []).length)) return "";
@@ -2213,36 +2225,45 @@ const axCard = (id, x, summary, evidence, form) => { const [cl, lb] = axStatus(x
 function axHead(kind, R0, list, extra) {
   const n = k => list.filter(([id]) => axStatus(S.ax[id])[1].startsWith(k)).length;
   return `<div class="panel stack"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><span class="lbl">${esc(clsName())} · ${esc(R0.section)} · ${esc(R0.skill)}</span><h2>${kind === "speak" ? "🎙" : "✍️"} ${esc(R0.title)}</h2>
-      <p class="small muted">Projects: ${Object.values(AIR.projects).map(esc).join(" · ")} · ${R0.crit.map(c => `${esc(c.code)} ${esc(c.title)}`).join(" · ")} · Maximum ${R0.max.toFixed(1)} points</p></div></div>
+      <p class="small muted">Projects: ${Object.values(AIR.projects).map(esc).join(" · ")} · ${R0.crit.map(c => `${esc(c.code)} ${esc(c.title)}`).join(" · ")} · Maximum ${R0.max} points · ${R0.steps.every(Number.isInteger) ? "whole numbers only" : "0.5-point steps"}</p></div><button class="btn ${S.axRubOpen === kind ? "" : "ghost "}sm" data-act="axrubtoggle" data-kind="${kind}">✎ Change assessment</button></div>
+    ${S.axRubOpen === kind ? axRubPicker(kind) : ""}
     <div class="row small"><span class="tag">Pending Assessment ${n("Pending")}</span><span class="tag st-pending">AI-Assessed – Draft ${n("AI-Assessed")}</span><span class="tag st-rev">Teacher Reviewed ${n("Teacher")}</span><span class="tag st-ok">Published ${n("✓")}</span></div>
     <ol class="small muted axsteps"><li>Open a submission and ${kind === "speak" ? "listen to the recording" : "read the description and look at the photos"}.</li><li>Tap <b>Assess ${kind === "speak" ? "Audio" : "Writing"} with AI</b>. Scores and feedback appear in about a minute, as a private draft.</li><li>Check the AI's evidence against the descriptors.</li><li>Change any score, level or comment, then <b>Save draft</b> or <b>Reassess with AI</b>.</li><li>When you agree with it, tap <b>Approve and publish</b>. Only then can the student see it.</li></ol>
-    ${extra || ""}${axRubric(R0.crit)}</div>`;
+    ${extra || ""}${axRubric(R0)}</div>`;
 }
 const axName = (uid, d) => { const p = S.people[uid] || {}; return `<b>${esc(p.name || (d && d.name) || "Student")}</b><span class="small muted">${esc(p.realName || "")}${p.team || (d && d.team) ? ` · Team ${esc(p.team || d.team)}` : ""}</span>`; };
 const axCatTag = d => { const c = d && catOf(d.cat); return c ? `<span class="tag cat">${c[2]} ${esc((AIR.projects || {})[d.cat] || c[1])}</span>` : ""; };
 
+// One editable block per criterion (score, AI/teacher marker, descriptors, AI evidence).
+function axCritBlocks(id, R0, sc, ai) {
+  return R0.crit.map(c => { const v = Number(sc[c.id]) || 0, a = ai && ai.criteria && ai.criteria[c.id], av = axAiScores(ai)[c.id];
+    return `<div class="crit"><div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><div style="min-width:0"><b>${esc(c.title)}</b> <span class="tag">${esc(c.code)}</span>${c.focus ? `<p class="small muted">${esc(c.focus)}</p>` : ""}</div>
+      <select class="input" id="ax-${esc(id)}-${c.id}" data-ax="${esc(id)}" aria-label="${esc(c.code)} score">${axOpts(v, "Score", R0)}</select></div>
+      <span id="ax-${esc(id)}-m-${c.id}">${axMark(ai, av, v, axF)}</span>
+      <div id="ax-${esc(id)}-ds-${c.id}">${v ? `<p class="small"><b>${esc(axLevel(v, R0))}</b></p>` : ""}${axUl(axDesc(c, v))}</div>
+      ${a && a.rationale ? `<p class="small muted">✨ <b>AI evidence:</b> ${esc(a.rationale)}</p>` : ""}</div>`; }).join("");
+}
+const axSetNote = (x, R0) => x && x.ai && x.ai.set && x.ai.set !== R0.id ? `<div class="flagbox small">⚠ This AI draft used a different rubric than the one now chosen for ${esc(clsName())}. Tap <b>Reassess with AI</b> to assess it with the current rubric.</div>` : "";
 function axSpeakBody() {
   if (!AIR) return `<div class="panel"><p class="muted">Loading the rubric…</p></div>`;
-  const R0 = AIR.speaking, c = R0.crit[0];
+  const R0 = AIR.speaking, inter = R0.crit.some(c => c.interaction);
   const list = Object.entries(S.subs).filter(([, s]) => s && !["removed", "rejected"].includes(s.status)).map(([uid, s]) => [uid + "~s", uid, s])
     .sort((a, b) => String((S.people[a[1]] || a[2]).name || "").localeCompare(String((S.people[b[1]] || b[2]).name || "")));
-  const head = axHead("speak", R0, list);
+  const head = axHead("speak", R0, list, inter ? `<p class="small muted">${esc(R0.crit.filter(c => c.interaction).map(c => c.code).join(", "))} also uses each student's questions on classmates' posts and their replies on their own post (shown with each recording).</p>` : "");
   if (!list.length) return head + `<div class="empty-state panel"><h3>No Team Stories yet</h3><p class="muted">Recordings appear here after students post their team story.</p></div>`;
   return `<div class="stack">${head}<h2>Team Story recordings (${list.length})</h2>${list.map(([id, uid, s]) => {
-    const x = S.ax[id], ai = x && x.ai, cur = axCur(id), v = Number(cur.score) || 0;
+    const x = S.ax[id], ai = x && x.ai, cur = axCur(id), sc = cur.scores || {}, one = R0.crit.length === 1;
+    const ev = inter ? evidenceFor(uid) : null, lst = arr => arr.length ? `<ul class="ul small">${arr.slice(0, 10).map(c => `<li>${esc(c.text)}</li>`).join("")}</ul>` : `<p class="small muted">None yet.</p>`;
     const evidence = `<div class="box stack" style="gap:8px"><span class="lbl">🎧 Listen before approving · ${esc(s.title || "Team story")}</span>${axCatTag(s)}${s.media ? playerHtml({ media: s.media, mediaKind: s.mediaKind }, true) : `<p class="small muted">No recording attached.</p>`}${s.desc ? `<p class="small">${esc(s.desc)}</p>` : ""}</div>
-      ${axFlags(x)}
-      ${ai && ai.evidence ? `<div class="note small">✨ <b>Why the AI suggested ${axF(ai.score)} (${esc(ai.level)}):</b> ${esc(ai.evidence)}</div>` : ""}
+      ${axSetNote(x, R0)}${axFlags(x)}
+      ${ai && ai.evidence ? `<div class="note small">✨ <b>Why the AI suggested this band:</b> ${esc(ai.evidence)}</div>` : ""}
+      ${ev ? `<div class="box stack" style="gap:6px"><span class="lbl">Questioning and interaction evidence</span><b class="small">Questions asked on classmates' posts (${ev.asked.length})</b>${lst(ev.asked)}<b class="small">Replies on their own post (${ev.answers.length}) · questions received (${ev.received.length})</b>${lst(ev.answers)}</div>` : ""}
       ${ai && ai.transcript ? `<details class="box"><summary class="lbl" style="cursor:pointer">Transcript of the recording (by AI, may contain errors)</summary><p class="story small" style="margin-top:8px">${esc(ai.transcript)}</p></details>` : ""}
       ${s.script ? `<details class="box"><summary class="lbl" style="cursor:pointer">Written script (context only, not assessed)</summary><p class="story small" style="margin-top:8px">${esc(s.script)}</p></details>` : ""}
       ${axHistory(x, "speak")}`;
-    const form = `${axButtons(id, x, "Audio")}
-      <div class="crit"><div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><div style="min-width:0"><b>${esc(c.title)}</b> <span class="tag">${esc(c.code)}</span><p class="small muted">Suggested score 1.0–4.0</p></div>
-        <select class="input" id="ax-${esc(id)}-score" data-ax="${esc(id)}" aria-label="S1 score">${axOpts(v)}</select></div>
-        <span id="ax-${esc(id)}-m-score">${axMark(ai, ai && ai.score, v, axF)}</span>
-        <div id="ax-${esc(id)}-ds">${axUl(axDesc(c, v))}</div>
-        <div class="field"><label for="ax-${esc(id)}-level">Performance level <span id="ax-${esc(id)}-m-level">${axMark(ai, ai && ai.level, cur.level)}</span></label><select class="input" id="ax-${esc(id)}-level" data-ax="${esc(id)}"><option value="">Level</option>${AIR.steps.map(st => AIR.levels[String(st)]).map(l => `<option${cur.level === l ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div></div>
-      <div class="row" style="justify-content:space-between"><span class="lbl">Total</span><span class="totline" id="ax-${esc(id)}-tot">${axF(v)} / 4.0</span></div>
+    const form = `${axButtons(id, x, "Audio")}${axCritBlocks(id, R0, sc, ai)}
+      ${one ? `<div class="field"><label for="ax-${esc(id)}-level">Performance level <span id="ax-${esc(id)}-m-level">${axMark(ai, ai && ai.level, cur.level)}</span></label><select class="input" id="ax-${esc(id)}-level" data-ax="${esc(id)}"><option value="">Level</option>${R0.steps.map(st => R0.levels[String(st)]).map(l => `<option${cur.level === l ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>` : ""}
+      <div class="row" style="justify-content:space-between"><span class="lbl">Total (${esc(R0.crit.map(c => c.code).join(" + "))})</span><span class="totline" id="ax-${esc(id)}-tot">${fmtScore(axTotal(sc, R0))} / ${R0.max}</span></div>
       ${axTextFields(id, x, cur)}${axActions(id, x, (S.people[uid] || s).name || "the student")}`;
     return axCard(id, x, axName(uid, s) + `<span class="small muted">· ${esc(s.title || "")}</span>`, evidence, form);
   }).join("")}</div>`;
@@ -2254,7 +2275,7 @@ function axWriteBody() {
   const R0 = AIR.writing, list = [];
   Object.entries(S.psubs).forEach(([uid, d]) => Object.entries((d && d.items) || {}).forEach(([pid, it]) => { if (it && !["removed", "rejected"].includes(it.status)) list.push([uid + "~w~" + pid, uid, it]); }));
   list.sort((a, b) => String((S.people[a[1]] || a[2]).name || "").localeCompare(String((S.people[b[1]] || b[2]).name || "")) || (a[2].submittedAt || 0) - (b[2].submittedAt || 0));
-  const head = axHead("write", R0, list, `<p class="small muted">The photo check is shown separately and is <b>not</b> part of the 16-point total. You can add an optional photo score yourself.</p>`);
+  const head = axHead("write", R0, list, `<p class="small muted">The photo check is shown separately and is <b>not</b> part of the ${R0.max}-point total. You can add an optional photo score yourself.</p>`);
   if (!list.length) return head + `<div class="empty-state panel"><h3>No Trip Diaries yet</h3><p class="muted">Trip Diary posts appear here after students submit them.</p></div>`;
   return `<div class="stack">${head}<h2>Trip Diary posts (${list.length})</h2>${list.map(([id, uid, it]) => {
     const x = S.ax[id], ai = x && x.ai, cur = axCur(id), sc = cur.scores || {}, al = ai && ai.alignment;
@@ -2263,49 +2284,40 @@ function axWriteBody() {
       ${detailsHtml({ ...it, details: it.details || {} })}
       <div class="box stack" style="gap:8px"><span class="lbl">Photos (${photos.length})</span>${photos.length ? `<div class="axphotos">${photos.map((g, i) => g.kind === "video" ? `<video controls playsinline preload="metadata" src="${esc(mediaSrc(g.ref))}"></video>` : `<a href="${esc(mediaSrc(g.ref))}" target="_blank" rel="noopener"><img src="${esc(mediaSrc(g.ref))}" alt="Photo ${i + 1}" loading="lazy"><span class="small">Photo ${i + 1}</span></a>`).join("")}</div>` : `<p class="small muted">No photos.</p>`}</div>
       ${axFlags(x)}${axHistory(x, "write")}`;
-    const crit = R0.crit.map(c => { const v = Number(sc[c.id]) || 0, a = ai && ai.criteria && ai.criteria[c.id];
-      return `<div class="crit"><div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><div style="min-width:0"><b>${esc(c.title)}</b> <span class="tag">${esc(c.code)}</span></div>
-        <select class="input" id="ax-${esc(id)}-${c.id}" data-ax="${esc(id)}" aria-label="${esc(c.code)} score">${axOpts(v)}</select></div>
-        <span id="ax-${esc(id)}-m-${c.id}">${axMark(ai, a && a.score, v, axF)}</span>
-        <div id="ax-${esc(id)}-ds-${c.id}">${v ? `<p class="small"><b>${esc(axLevel(v))}</b></p>` : ""}${axUl(axDesc(c, v))}</div>
-        ${a && a.rationale ? `<p class="small muted">✨ <b>AI evidence:</b> ${esc(a.rationale)}</p>` : ""}</div>`; }).join("");
+    const crit = axSetNote(x, R0) + axCritBlocks(id, R0, sc, ai);
     const [acl, alb] = al ? (AX_ALIGN[al.status] || AX_ALIGN.unclear) : ["", ""];
     const align = `<div class="alignbox stack"><div class="row" style="justify-content:space-between"><b>📷 Photograph and description alignment</b><span class="small muted">Separate from the writing score</span></div>
       ${al ? `<span class="tag ${acl}">${alb}</span>${al.summary ? `<p class="small">${esc(al.summary)}</p>` : ""}
         ${al.concerns && al.concerns.length ? `<div class="flagbox small"><b>Concerns for you to check</b><ul class="ul">${al.concerns.map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>` : ""}
         ${al.photos && al.photos.length ? `<details><summary class="small" style="cursor:pointer">What the AI saw in each photo</summary><ul class="ul small">${al.photos.map(p => `<li><b>Photo ${p.n}:</b> ${esc(p.seen)} <span class="muted">${esc(p.fit)}</span></li>`).join("")}</ul></details>` : ""}` : `<p class="small muted">Appears after the AI assessment.</p>`}
       <div class="field"><label for="ax-${esc(id)}-an">Photo feedback for the student <span id="ax-${esc(id)}-m-an">${axMark(ai, al && al.studentFeedback, cur.alignNote)}</span></label><textarea class="input" id="ax-${esc(id)}-an" data-ax="${esc(id)}" rows="2" maxlength="800">${esc(cur.alignNote || "")}</textarea></div>
-      <div class="field"><label for="ax-${esc(id)}-as">Optional photo score (your choice, not added to the 16-point total)</label><select class="input" id="ax-${esc(id)}-as" data-ax="${esc(id)}" style="max-width:240px">${axOpts(cur.alignScore, "Not scored")}</select></div></div>`;
+      <div class="field"><label for="ax-${esc(id)}-as">Optional photo score (your choice, not added to the ${R0.max}-point total)</label><select class="input" id="ax-${esc(id)}-as" data-ax="${esc(id)}" style="max-width:240px">${axOpts(cur.alignScore, "Not scored", R0)}</select></div></div>`;
     const form = `${axButtons(id, x, "Writing")}${crit}
-      <div class="row" style="justify-content:space-between"><span class="lbl">Total (10W1–10W4)</span><span class="totline" id="ax-${esc(id)}-tot">${fmtScore(axTotal(sc))} / 16</span></div>
+      <div class="row" style="justify-content:space-between"><span class="lbl">Total (${esc(R0.crit.map(c => c.code).join(" + "))})</span><span class="totline" id="ax-${esc(id)}-tot">${fmtScore(axTotal(sc, R0))} / ${R0.max}</span></div>
       ${axTextFields(id, x, cur)}${align}${axActions(id, x, (S.people[uid] || it).name || "the student")}`;
     return axCard(id, x, axName(uid, it) + `<span class="small muted">· ${esc(it.title || "")}</span>`, evidence, form);
   }).join("")}</div>`;
 }
 
 function readAx(id) {
-  const type = axType(id), g = k => document.getElementById(`ax-${id}-${k}`), v = k => (g(k) || {}).value || "";
+  const type = axType(id), R0 = axR(type), g = k => document.getElementById(`ax-${id}-${k}`), v = k => (g(k) || {}).value || "";
   if (!g("fb")) return axCur(id);
-  const cur = { strengths: [0, 1, 2].map(i => v("st" + i).trim()), improvements: [0, 1, 2].map(i => v("im" + i).trim()), feedback: v("fb").trim() };
-  if (type === "speak") Object.assign(cur, { score: Number(v("score")) || 0, level: v("level") });
-  else Object.assign(cur, { scores: Object.fromEntries(AIR.writing.crit.map(c => [c.id, Number(v(c.id)) || 0])), alignNote: v("an").trim(), alignScore: Number(v("as")) || 0 });
+  const cur = { set: R0.id, scores: Object.fromEntries(R0.crit.map(c => [c.id, Number(v(c.id)) || 0])), strengths: [0, 1, 2].map(i => v("st" + i).trim()), improvements: [0, 1, 2].map(i => v("im" + i).trim()), feedback: v("fb").trim() };
+  if (type === "speak") cur.level = R0.crit.length === 1 ? v("level") : "";
+  else Object.assign(cur, { alignNote: v("an").trim(), alignScore: Number(v("as")) || 0 });
   return cur;
 }
 // Live updates while the teacher edits: descriptors, level, total and the AI/teacher markers.
 function axChange(t) {
-  const id = t.dataset.ax, type = axType(id), x = S.ax[id], ai = x && x.ai, set = (k, h) => { const el = document.getElementById(`ax-${id}-${k}`); if (el) el.innerHTML = h; };
-  if (type === "speak" && t.id.endsWith("-score")) { const lv = document.getElementById(`ax-${id}-level`); if (lv) lv.value = axLevel(t.value); }
+  const id = t.dataset.ax, type = axType(id), R0 = axR(type), x = S.ax[id], ai = x && x.ai, set = (k, h) => { const el = document.getElementById(`ax-${id}-${k}`); if (el) el.innerHTML = h; };
+  if (R0.crit.length === 1 && t.id === `ax-${id}-${R0.crit[0].id}`) { const lv = document.getElementById(`ax-${id}-level`); if (lv) lv.value = axLevel(t.value, R0); }
   const cur = readAx(id); S.axEdits[id] = cur;
   set("m-st", axMark(ai, ai && ai.strengths, cur.strengths)); set("m-im", axMark(ai, ai && ai.improvements, cur.improvements)); set("m-fb", axMark(ai, ai && ai.feedback, cur.feedback));
-  if (type === "speak") {
-    const c = AIR.speaking.crit[0];
-    set("ds", axUl(axDesc(c, cur.score))); set("tot", `${axF(cur.score)} / 4.0`);
-    set("m-score", axMark(ai, ai && ai.score, cur.score, axF)); set("m-level", axMark(ai, ai && ai.level, cur.level));
-  } else {
-    AIR.writing.crit.forEach(c => { const v = cur.scores[c.id], a = ai && ai.criteria && ai.criteria[c.id];
-      set("ds-" + c.id, (v ? `<p class="small"><b>${esc(axLevel(v))}</b></p>` : "") + axUl(axDesc(c, v))); set("m-" + c.id, axMark(ai, a && a.score, v, axF)); });
-    set("tot", `${fmtScore(axTotal(cur.scores))} / 16`); set("m-an", axMark(ai, ai && ai.alignment && ai.alignment.studentFeedback, cur.alignNote));
-  }
+  R0.crit.forEach(c => { const v = cur.scores[c.id];
+    set("ds-" + c.id, (v ? `<p class="small"><b>${esc(axLevel(v, R0))}</b></p>` : "") + axUl(axDesc(c, v))); set("m-" + c.id, axMark(ai, axAiScores(ai)[c.id], v, axF)); });
+  set("tot", `${fmtScore(axTotal(cur.scores, R0))} / ${R0.max}`);
+  if (type === "speak") set("m-level", axMark(ai, ai && ai.level, cur.level));
+  else set("m-an", axMark(ai, ai && ai.alignment && ai.alignment.studentFeedback, cur.alignNote));
 }
 async function axStart(id) {
   const x = S.ax[id];
@@ -2328,11 +2340,13 @@ function axPubPanel() {
     ${(r.improvements || []).filter(Boolean).length ? `<div class="note"><b>Areas for improvement</b><ul class="ul">${r.improvements.filter(Boolean).map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>` : ""}
     ${r.feedback ? `<div class="note"><b>Teacher feedback</b><p style="margin-top:4px">${esc(r.feedback)}</p></div>` : ""}`;
   const bar = (lab, v, sub) => `<div class="crit-row"><div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>${lab}</b><b style="white-space:nowrap">${axF(v)} / 4</b></div><div class="meter"><i style="width:${(Number(v) || 0) * 25}%"></i></div>${sub}</div>`;
-  const speak = sp ? `<div class="panel stack grade">${axRankRibbon(rk.speak, "Team Stories speaking")}<div class="row" style="justify-content:space-between;align-items:flex-end"><div><span class="lbl">Team Stories · Speaking · ${esc(AIR.speaking.title)}</span><h2>🎙 ${esc(sp.title || "My team story")}</h2></div><div class="bigscore">${axF(sp.score)}<span class="small muted" style="font-size:1rem"> / 4</span></div></div>
-    ${bar(`S1 · ${esc(sp.level || axLevel(sp.score))}`, sp.score, axUl(sp.descriptors || axDesc(AIR.speaking.crit[0], sp.score)))}${notes(sp)}</div>` : "";
-  const write = wr.map(r => `<div class="panel stack grade"><div class="row" style="justify-content:space-between;align-items:flex-end"><div><span class="lbl">Trip Diary · Writing · ${esc(AIR.writing.title)}</span><h2>✍️ ${esc(r.title || "My trip diary")}</h2></div><div class="bigscore">${fmtScore(r.total)}<span class="small muted" style="font-size:1rem"> / 16</span></div></div>
-    <div class="scores">${AIR.writing.crit.map(c => bar(`${esc(c.code)} ${esc(c.title)}`, (r.scores || {})[c.id], `<p class="small muted">${esc(axLevel((r.scores || {})[c.id]))}: ${esc(axDesc(c, (r.scores || {})[c.id]).join(" "))}</p>`)).join("")}</div>
-    ${notes(r)}${r.photo && (r.photo.note || r.photo.score) ? `<div class="note"><b>📷 Your photos and your writing</b>${r.photo.score ? ` <span class="tag">${axF(r.photo.score)} / 4 · not part of the total</span>` : ""}${r.photo.note ? `<p style="margin-top:4px">${esc(r.photo.note)}</p>` : ""}</div>` : ""}</div>`).join("");
+  // Each published result carries the rubric wording it was published with.
+  const rows = (r, R) => (r.crit || R.crit.map(c => ({ code: c.code, title: c.title, score: (axNorm(r).scores || {})[c.id], level: axLevel((axNorm(r).scores || {})[c.id], R), desc: axDesc(c, (axNorm(r).scores || {})[c.id]) })))
+    .map(c => bar(`${esc(c.code)} ${esc(c.title)}`, c.score, `<p class="small muted"><b>${esc(c.level || "")}</b>${(c.desc || []).length ? ": " + esc(c.desc.join(" ")) : ""}</p>`)).join("");
+  const card = (r, R, lbl, icon, fallback, rib) => `<div class="panel stack grade">${rib}<div class="row" style="justify-content:space-between;align-items:flex-end"><div><span class="lbl">${esc(lbl)} · ${esc(r.project || R.title)}</span><h2>${icon} ${esc(r.title || fallback)}</h2>${r.level ? `<p class="small muted">${esc(r.level)}</p>` : ""}</div><div class="bigscore">${fmtScore(r.total != null ? r.total : r.score)}<span class="small muted" style="font-size:1rem"> / ${r.max || R.max}</span></div></div>
+    <div class="scores">${rows(r, R)}</div>${notes(r)}${r.photo && (r.photo.note || r.photo.score) ? `<div class="note"><b>📷 Your photos and your writing</b>${r.photo.score ? ` <span class="tag">${axF(r.photo.score)} / 4 · not part of the total</span>` : ""}${r.photo.note ? `<p style="margin-top:4px">${esc(r.photo.note)}</p>` : ""}</div>` : ""}</div>`;
+  const speak = sp ? card(sp, AIR.speaking, "Team Stories · Speaking", "🎙", "My team story", axRankRibbon(rk.speak, "Team Stories speaking")) : "";
+  const write = wr.map(r => card(r, AIR.writing, "Trip Diary · Writing", "✍️", "My trip diary", "")).join("");
   const wrib = wr.length && rk.write && rk.write.rank ? `<div class="panel grade">${axRankRibbon(rk.write, "Trip Diaries writing")}</div>` : "";
   return `<div class="stack" id="my-assess">${speak}${wrib}${write}</div>`;
 }
@@ -2351,13 +2365,14 @@ const axActs = {
     const src = type === "speak" ? S.subs[uid] : ((S.psubs[uid] || {}).items || {})[pid];
     const clean = a => (a || []).map(s => String(s || "").trim()).filter(Boolean);
     let res;
-    if (type === "speak") {
-      if (!cur.score || !cur.level) { toast("Choose a score and a performance level first."); return; }
-      res = { title: (src && src.title) || "", cat: (src && src.cat) || "", score: cur.score, max: 4, level: cur.level, descriptors: axDesc(AIR.speaking.crit[0], cur.score), strengths: clean(cur.strengths), improvements: clean(cur.improvements), feedback: cur.feedback, publishedAt: at };
-    } else {
-      if (AIR.writing.crit.some(c => !cur.scores[c.id])) { toast("Give a score for all four criteria first."); return; }
-      res = { title: (src && src.title) || "", cat: (src && src.cat) || "", scores: cur.scores, total: axTotal(cur.scores), max: 16, strengths: clean(cur.strengths), improvements: clean(cur.improvements), feedback: cur.feedback, photo: { note: cur.alignNote, score: cur.alignScore || 0 }, publishedAt: at };
-    }
+    const R0 = axR(type);
+    if (R0.crit.some(c => !cur.scores[c.id])) { toast(`Give a score for every criterion (${R0.crit.map(c => c.code).join(", ")}) first.`); return; }
+    if (type === "speak" && R0.crit.length === 1 && !cur.level) { toast("Choose a performance level first."); return; }
+    const total = axTotal(cur.scores, R0);
+    res = { title: (src && src.title) || "", cat: (src && src.cat) || "", project: R0.title, set: R0.id, scores: cur.scores, total, max: R0.max,
+      crit: R0.crit.map(c => ({ id: c.id, code: c.code, title: c.title, score: cur.scores[c.id], level: axLevel(cur.scores[c.id], R0), desc: axDesc(c, cur.scores[c.id]) })),
+      level: type === "speak" && R0.crit.length === 1 ? cur.level : "", strengths: clean(cur.strengths), improvements: clean(cur.improvements), feedback: cur.feedback, publishedAt: at };
+    if (type === "write") res.photo = { note: cur.alignNote, score: cur.alignScore || 0 };
     await upsert("aipub/" + uid, type === "speak" ? { k: S.klass, speak: res } : { k: S.klass, write: { [pid]: res } });
     await upsert("aiassess/" + id, { uid, type, pid, k: S.klass, cur, pub: cur, status: "published", approvedAt: at, publishedAt: at, history: [{ action: "approved and published", at, cur }, ...(x.history || [])].slice(0, 20) });
     if (axRankAt(type)) await axApplyRanks(type, true, { ...S.ax, [id]: { ...x, uid, type, pid, pub: cur, status: "published", publishedAt: at } });
@@ -2373,10 +2388,10 @@ const axActs = {
   }
 };
 /* ---------- Separate rankings: Team Stories (speaking, out of 4) and Trip Diaries (writing, out of 16) ----------
-   Only teacher-published results count. Speaking uses the latest published S1 score; writing uses the average
+   Only teacher-published results count. Speaking uses the latest published speaking total; writing uses the average
    published total of the student's Trip Diaries. Equal scores share a rank. Ranks reach students only after
    the teacher releases them, and only through the student's own "aipub" doc. */
-const AXR = { speak: { max: 4, name: "Team Stories · Speaking", unit: "S1" }, write: { max: 16, name: "Trip Diaries · Writing", unit: "10W1–10W4" } };
+const axRx = type => { const R = axR(type); return { max: R.max, name: type === "speak" ? "Team Stories · Speaking" : "Trip Diaries · Writing", unit: R.crit.map(c => c.code).join("–") }; };
 function axRankList(type, ax = S.ax) {
   const best = {};
   Object.values(ax).forEach(x => {
@@ -2384,7 +2399,7 @@ function axRankList(type, ax = S.ax) {
     const p = S.people[x.uid]; if (!p || isTestP(p)) return;
     const key = p.sid || x.uid, at = x.publishedAt || 0;
     const b = best[key] = best[key] || { uid: x.uid, p, at: 0, scores: [] };
-    const v = type === "speak" ? Number(x.pub.score) || 0 : axTotal(x.pub.scores);
+    const v = axTotal(axNorm(x.pub).scores, axR(type));
     if (type === "speak") { if (at >= b.at) b.scores = [v]; } else b.scores.push(v);
     if (at >= b.at) Object.assign(b, { uid: x.uid, p, at });
   });
@@ -2406,22 +2421,37 @@ async function axApplyRanks(type, show, ax = S.ax) {
 }
 function axRankBody(type) {
   if (!AIR) return `<div class="panel"><p class="muted">Loading…</p></div>`;
-  const R0 = AXR[type], arr = axRankList(type), N = rankTopFor(), rel = axRankAt(type);
+  const R0 = axRx(type), arr = axRankList(type), N = rankTopFor(), rel = axRankAt(type);
   const subs = type === "speak" ? Object.keys(S.subs).length : Object.values(S.psubs).reduce((n, d) => n + Object.values((d && d.items) || {}).filter(i => i && !["removed", "rejected"].includes(i.status)).length, 0);
   const ctl = rel
     ? `<div class="relbox"><span class="tag st-ok">✓ Ranks shown to students · ${esc(axWhen(rel))}</span><button class="btn ghost sm" data-act="axrankshow" data-type="${type}">Refresh ranks</button><button class="btn danger sm" data-act="axrankhide" data-type="${type}" data-confirm="Tap again to hide">Hide ranks</button></div>
        <p class="small muted">The top ${N} see their ${esc(R0.name)} rank on My Trip Diary. Everyone else sees only their published score. Ranks update by themselves when you publish or unpublish a result.</p>`
     : `<div class="relbox"><button class="btn hot" data-act="axrankshow" data-type="${type}" data-confirm="Tap again to show ranks"${arr.length ? "" : " disabled"}>🏆 Show ranks to the top ${N}</button></div><p class="small muted">🔒 Hidden from students. Only you can see this ranking until you show it.</p>`;
   const rows = arr.map(e => `<tr class="${e.rank <= N ? "topn" : ""}"><td><span class="rankpill">${e.rank}</span></td><td><b>${esc(e.p.name || "Student")}</b><br><span class="small muted">${esc(e.p.realName || "")}${e.p.team ? ` · Team ${esc(e.p.team)}` : ""}</span></td>
-    ${type === "speak" ? `<td>${esc(axLevel(e.score))}</td>` : `<td class="num">${e.scores.length}</td>`}<td class="num tot">${type === "speak" ? axF(e.score) : fmtScore(e.score)}<span class="small muted">/${R0.max}</span></td>
+    ${type === "speak" ? `<td>${esc(axR("speak").crit.length === 1 ? axLevel(e.score, axR("speak")) : "")}</td>` : `<td class="num">${e.scores.length}</td>`}<td class="num tot">${fmtScore(e.score)}<span class="small muted">/${R0.max}</span></td>
     <td>${e.rank <= N ? `<span class="tag ${rel ? "st-ok" : ""}">${rel ? "🏆 Sees rank" : "Will see rank"}</span>` : `<span class="small muted">Score only</span>`}</td></tr>`).join("");
-  const table = arr.length ? `<div class="tbl-wrap"><table class="results"><thead><tr><th>Rank</th><th>Student</th>${type === "speak" ? "<th>Level</th>" : "<th>Trip Diaries<span class=\"small\">published</span></th>"}<th>${type === "speak" ? "S1 score" : "Average total"}<span class="small">out of ${R0.max}</span></th><th>Rank shown</th></tr></thead><tbody>${rows}</tbody></table></div>`
+  const table = arr.length ? `<div class="tbl-wrap"><table class="results"><thead><tr><th>Rank</th><th>Student</th>${type === "speak" ? "<th>Level</th>" : "<th>Trip Diaries<span class=\"small\">published</span></th>"}<th>${type === "speak" ? `${esc(R0.unit)} total` : "Average total"}<span class="small">out of ${R0.max}</span></th><th>Rank shown</th></tr></thead><tbody>${rows}</tbody></table></div>`
     : `<p class="small muted">The ranking appears once you publish the first ${type === "speak" ? "speaking" : "writing"} result.</p>`;
   return `<div class="stack"><div class="panel stack"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><span class="lbl">${esc(clsName())} · ${esc(R0.name)} · ${esc(R0.unit)} · out of ${R0.max}</span><h2>🏆 ${type === "speak" ? "Speaking" : "Writing"} ranking</h2></div><span class="tag">${arr.length} ranked · ${subs} submission${subs === 1 ? "" : "s"}</span></div>
-    <p class="small muted">Only published results count: drafts and unpublished scores are left out. ${type === "speak" ? "Uses each student's published S1 score." : "Uses the average published total (10W1–10W4) of each student's Trip Diaries."} Highest first; equal scores share a rank. This ranking is separate from the ${type === "speak" ? "writing" : "speaking"} ranking and the two are never combined. Test accounts are not ranked.</p>
+    <p class="small muted">Only published results count: drafts and unpublished scores are left out. ${type === "speak" ? `Uses each student's latest published ${esc(R0.unit)} total.` : `Uses the average published total (${esc(R0.unit)}) of each student's Trip Diaries.`} Highest first; equal scores share a rank. This ranking is separate from the ${type === "speak" ? "writing" : "speaking"} ranking and the two are never combined. Test accounts are not ranked.</p>
     ${ctl}${table}<p class="small muted">Highlighted rows are the top ${N} (change this in the Class tab).</p></div></div>`;
 }
+function axRubPicker(kind) {
+  const section = kind === "speak" ? "speaking" : "writing", sets = AIR0.sets[section], cur = axSetId(section);
+  return `<div class="box stack" style="gap:10px;border:2px solid var(--accent)"><b>✎ Change the ${kind === "speak" ? "Team Stories speaking" : "Trip Diaries writing"} assessment for ${esc(clsName())}</b>
+    <div class="field"><label for="axset-${kind}">Rubric</label><select class="input" id="axset-${kind}">${Object.values(sets).map(r => `<option value="${esc(r.id)}"${r.id === cur ? " selected" : ""}>${esc(r.name || r.title)}</option>`).join("")}</select></div>
+    <p class="small muted">New AI assessments use the chosen rubric straight away. Drafts made with another rubric are marked so you can reassess them. Results already published keep the rubric they were published with.</p>
+    <div class="row"><button class="btn teal sm" data-act="axrubsave" data-kind="${kind}">Use this rubric</button><button class="btn ghost sm" data-act="axrubtoggle" data-kind="${kind}">Cancel</button></div></div>`;
+}
 const axRankActs = {
+  axrubtoggle(b) { S.axRubOpen = S.axRubOpen === b.dataset.kind ? null : b.dataset.kind; paint(true); },
+  async axrubsave(b) {
+    const kind = b.dataset.kind, section = kind === "speak" ? "speaking" : "writing", v = (document.getElementById("axset-" + kind) || {}).value;
+    if (!AIR0.sets[section][v]) return;
+    await upsert(cfgPath("class"), { axSets: { [section]: v } });
+    S.cls = merge(clone(S.cls || {}), { axSets: { [section]: v } }); S.axRubOpen = null; S.axEdits = {}; axApplyRub(); paint(true);
+    toast(`${clsName()} now uses ${AIR0.sets[section][v].name || AIR0.sets[section][v].title}`);
+  },
   async axrankshow(b) { const arr = await axApplyRanks(b.dataset.type, true); toast(`Ranks shown to the top ${Math.min(rankTopFor(), arr.length)}.`); },
   async axrankhide(b) { await axApplyRanks(b.dataset.type, false); toast("Ranks hidden. Students see only their published score."); }
 };
