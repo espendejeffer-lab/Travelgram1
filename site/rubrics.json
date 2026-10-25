@@ -1,0 +1,349 @@
+{
+ "steps": [
+  4,
+  3.5,
+  3,
+  2.5,
+  2,
+  1.5,
+  1
+ ],
+ "levels": {
+  "4": "Excellent",
+  "3.5": "Very Good",
+  "3": "Good",
+  "2.5": "Satisfactory",
+  "2": "Developing",
+  "1.5": "Limited",
+  "1": "Needs Improvement"
+ },
+ "projects": {
+  "blog": "Travel Blog",
+  "food": "Food Review",
+  "adventure": "Adventure"
+ },
+ "sets": {
+  "speaking": {
+   "s10": {
+    "section": "Team Stories",
+    "title": "Recorded Audio Blogpost",
+    "skill": "Speaking",
+    "max": 4,
+    "crit": [
+     {
+      "id": "s1",
+      "code": "S1",
+      "title": "Communicate a range of ideas, facts, and opinions.",
+      "desc": {
+       "4": [
+        "Communicates a wide range of ideas, facts, and opinions with exceptional clarity and depth.",
+        "Provides vivid descriptions, specific examples, and thoughtful personal reflections.",
+        "Delivers a highly engaging, coherent, and well-developed audio blogpost."
+       ],
+       "3.5": [
+        "Communicates varied ideas, facts, and opinions clearly and confidently.",
+        "Includes relevant details, examples, and meaningful personal reflections.",
+        "Presents an engaging and logically developed audio blogpost with minor weaknesses."
+       ],
+       "3": [
+        "Communicates relevant ideas, facts, and opinions with generally clear explanations.",
+        "Provides sufficient supporting details and examples, although some ideas lack depth.",
+        "Presents a mostly coherent audio blogpost with occasional gaps in development."
+       ],
+       "2.5": [
+        "Communicates several relevant ideas and facts, but opinions are not fully developed.",
+        "Provides some examples and descriptions, although details are limited or repetitive.",
+        "Presents an understandable audio blogpost with uneven development."
+       ],
+       "2": [
+        "Communicates basic ideas and facts with limited elaboration.",
+        "Expresses simple opinions but provides few supporting details or examples.",
+        "Presents an audio blogpost that is partially developed and occasionally difficult to follow."
+       ],
+       "1.5": [
+        "Communicates a narrow range of ideas and facts with minimal explanation.",
+        "Provides vague descriptions and rarely supports opinions with relevant examples.",
+        "Presents a fragmented audio blogpost with significant gaps in content."
+       ],
+       "1": [
+        "Communicates very few relevant ideas, facts, or opinions.",
+        "Provides little or no meaningful description, explanation, or personal reflection.",
+        "Presents an incomplete or largely unclear audio blogpost with insufficient content."
+       ]
+      }
+     }
+    ],
+    "id": "s10",
+    "name": "Stage 10 – Recorded Audio Blogpost (S1, out of 4)"
+   },
+   "s9p3": {
+    "id": "s9p3",
+    "name": "Stage 9 – Project 3 Speaking (9Sc.01–9Sc.02, out of 8)",
+    "section": "Team Stories",
+    "title": "Project 3 – Speaking",
+    "skill": "Speaking",
+    "max": 8,
+    "steps": [
+     4,
+     3,
+     2,
+     1
+    ],
+    "levels": {
+     "4": "Excellent",
+     "3": "Good",
+     "2": "Developing",
+     "1": "Needs Improvement"
+    },
+    "crit": [
+     {
+      "id": "c1",
+      "code": "9Sc.01",
+      "title": "Develop a clear descriptive account or narrative, expanding and supporting main points with details and examples.",
+      "focus": "Narrative development, clarity, supporting details, and examples",
+      "desc": {
+       "4": [
+        "Presents a clear, detailed, and engaging account or narrative.",
+        "Develops main ideas thoroughly with relevant examples and descriptions.",
+        "Communicates ideas confidently with logical progression and strong supporting details."
+       ],
+       "3": [
+        "Presents a clear and generally well-organised account or narrative.",
+        "Develops most main ideas with appropriate details and examples.",
+        "Communicates ideas effectively, although some explanations lack depth."
+       ],
+       "2": [
+        "Presents a basic account or narrative with some unclear ideas.",
+        "Provides limited details and examples to support main points.",
+        "Shows inconsistent organisation and development of ideas."
+       ],
+       "1": [
+        "Presents an unclear or incomplete account or narrative.",
+        "Provides very few relevant details or supporting examples.",
+        "Struggles to organise and communicate main ideas effectively."
+       ]
+      }
+     },
+     {
+      "id": "c2",
+      "code": "9Sc.02",
+      "title": "Ask questions to find out detailed information and to clarify meaning and opinion on a wide range of topics, including unfamiliar topics, and respond accordingly.",
+      "focus": "Questioning, clarification, responses, and interaction",
+      "interaction": true,
+      "desc": {
+       "4": [
+        "Asks thoughtful and relevant questions to obtain detailed information and clarify opinions.",
+        "Responds confidently and accurately to familiar and unfamiliar questions.",
+        "Maintains meaningful interaction by expanding responses and asking appropriate follow-up questions."
+       ],
+       "3": [
+        "Asks relevant questions to obtain information and clarify meaning.",
+        "Responds clearly to most questions with appropriate explanations.",
+        "Maintains interaction effectively, although some responses lack elaboration."
+       ],
+       "2": [
+        "Asks simple questions with limited detail or clarification.",
+        "Provides basic responses but struggles with unfamiliar questions.",
+        "Requires occasional support to maintain interaction and develop answers."
+       ],
+       "1": [
+        "Rarely asks relevant questions or seeks clarification.",
+        "Provides very limited, unclear, or inappropriate responses.",
+        "Struggles to maintain interaction, even with support."
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "writing": {
+   "w10": {
+    "section": "Trip Diary",
+    "title": "Written Blogpost",
+    "skill": "Writing",
+    "max": 16,
+    "crit": [
+     {
+      "id": "w1",
+      "code": "10W1",
+      "title": "Communicate Information, Ideas and Opinions",
+      "desc": {
+       "4": [
+        "Communicates detailed, insightful, and original ideas.",
+        "Develops opinions with convincing reasons and vivid examples.",
+        "Provides rich, relevant information and meaningful reflections."
+       ],
+       "3.5": [
+        "Communicates a wide range of clear and relevant ideas.",
+        "Supports opinions with effective examples and explanations.",
+        "Includes detailed information with minor gaps in development."
+       ],
+       "3": [
+        "Communicates relevant information and opinions clearly.",
+        "Supports most ideas with appropriate examples.",
+        "Provides sufficient details, although some lack depth."
+       ],
+       "2.5": [
+        "Communicates understandable but occasionally limited ideas.",
+        "Provides some explanations and supporting details.",
+        "Expresses opinions that are not consistently developed."
+       ],
+       "2": [
+        "Communicates basic information and simple opinions.",
+        "Provides limited explanations and examples.",
+        "Includes ideas that are sometimes unclear or repetitive."
+       ],
+       "1.5": [
+        "Communicates a narrow range of ideas and information.",
+        "Provides minimal explanation or supporting evidence.",
+        "Expresses vague or incomplete opinions."
+       ],
+       "1": [
+        "Communicates very little relevant information.",
+        "Provides almost no supporting examples or explanations.",
+        "Presents unclear or largely undeveloped ideas."
+       ]
+      }
+     },
+     {
+      "id": "w2",
+      "code": "10W2",
+      "title": "Organise Ideas into Coherent Text Using a Range of Linking Devices",
+      "desc": {
+       "4": [
+        "Organises ideas into a highly coherent and logical blogpost.",
+        "Uses a sophisticated range of linking devices accurately and naturally.",
+        "Creates seamless transitions between paragraphs and events."
+       ],
+       "3.5": [
+        "Organises ideas clearly with effective paragraph development.",
+        "Uses varied linking devices with only minor errors.",
+        "Maintains smooth progression throughout the text."
+       ],
+       "3": [
+        "Organises ideas logically with appropriate paragraphs.",
+        "Uses a suitable range of linking devices.",
+        "Maintains overall coherence despite occasional abrupt transitions."
+       ],
+       "2.5": [
+        "Presents ideas in a generally understandable order.",
+        "Uses some linking devices, although repetition occurs.",
+        "Shows occasional weaknesses in paragraph connections."
+       ],
+       "2": [
+        "Shows limited organisation and paragraph development.",
+        "Relies mainly on basic linking words.",
+        "Includes weak or unclear connections between ideas."
+       ],
+       "1.5": [
+        "Presents ideas in a frequently confusing order.",
+        "Uses very few appropriate linking devices.",
+        "Shows significant weaknesses in coherence and progression."
+       ],
+       "1": [
+        "Presents largely disconnected or disorganised ideas.",
+        "Uses almost no effective linking devices.",
+        "Lacks a clear structure and logical progression."
+       ]
+      }
+     },
+     {
+      "id": "w3",
+      "code": "10W3",
+      "title": "Use a Range of Appropriate Grammatical Structures and Vocabulary",
+      "desc": {
+       "4": [
+        "Uses a sophisticated range of grammatical structures accurately.",
+        "Demonstrates precise, varied, and topic-specific vocabulary.",
+        "Makes very few errors, without affecting meaning."
+       ],
+       "3.5": [
+        "Uses varied complex grammatical structures effectively.",
+        "Demonstrates a strong range of appropriate vocabulary.",
+        "Makes minor errors that rarely affect clarity."
+       ],
+       "3": [
+        "Uses a suitable combination of simple and complex structures.",
+        "Demonstrates generally accurate and varied vocabulary.",
+        "Makes occasional grammatical or word-choice errors."
+       ],
+       "2.5": [
+        "Uses mostly familiar grammatical structures with some variety.",
+        "Demonstrates adequate vocabulary with occasional repetition.",
+        "Makes noticeable errors, but meaning remains understandable."
+       ],
+       "2": [
+        "Relies heavily on simple grammatical structures.",
+        "Uses a limited range of vocabulary.",
+        "Makes frequent errors that sometimes affect meaning."
+       ],
+       "1.5": [
+        "Demonstrates very limited grammatical control.",
+        "Uses repetitive or frequently inappropriate vocabulary.",
+        "Makes persistent errors that interfere with understanding."
+       ],
+       "1": [
+        "Uses extremely limited grammatical structures.",
+        "Demonstrates insufficient vocabulary for the task.",
+        "Makes serious and frequent errors that obscure meaning."
+       ]
+      }
+     },
+     {
+      "id": "w4",
+      "code": "10W4",
+      "title": "Use Appropriate Register and Style for the Given Purpose and Audience",
+      "desc": {
+       "4": [
+        "Maintains a highly engaging, authentic, and audience-appropriate blogpost style.",
+        "Uses expressive language and an effective personal voice.",
+        "Adapts tone and register consistently to the topic and purpose."
+       ],
+       "3.5": [
+        "Maintains an engaging and appropriate blogpost style.",
+        "Uses descriptive and expressive language effectively.",
+        "Demonstrates consistent awareness of audience and purpose, with minor lapses."
+       ],
+       "3": [
+        "Uses a generally suitable tone and blogpost style.",
+        "Includes appropriate descriptive or personal expressions.",
+        "Shows awareness of audience and purpose, with occasional inconsistencies."
+       ],
+       "2.5": [
+        "Uses a mostly appropriate but sometimes inconsistent tone.",
+        "Includes some attempts at engaging the reader.",
+        "Demonstrates developing awareness of blogpost conventions."
+       ],
+       "2": [
+        "Uses a basic style with limited audience engagement.",
+        "Demonstrates inconsistent register or tone.",
+        "Shows limited understanding of blogpost conventions."
+       ],
+       "1.5": [
+        "Uses an often inappropriate or inconsistent writing style.",
+        "Includes very little personal voice or reader engagement.",
+        "Demonstrates weak awareness of audience and purpose."
+       ],
+       "1": [
+        "Uses a style unsuitable for the intended audience.",
+        "Demonstrates almost no awareness of register or purpose.",
+        "Fails to establish a recognisable or engaging blogpost style."
+       ]
+      }
+     }
+    ],
+    "id": "w10",
+    "name": "Stage 10 – Written Blogpost (10W1–10W4, out of 16)"
+   }
+  }
+ },
+ "defaults": {
+  "speaking": {
+   "s9": "s9p3",
+   "*": "s10"
+  },
+  "writing": {
+   "*": "w10"
+  }
+ }
+}

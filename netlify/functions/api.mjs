@@ -18,8 +18,9 @@ const TYPES = new Set(["image/jpeg", "image/png", "image/webp", "video/mp4", "vi
 
 // Same rules as the original site: everyone reads by default, only the teacher writes, except:
 const SELF_WRITE = new Set(["subs", "csubs", "psubs", "people", "reacts", "pcomments"]);
-const SELF_READ = new Set(["subs", "csubs", "psubs", "people", "grades"]);      // own doc only
-const TEACHER_READ = new Set(["subs", "csubs", "psubs", "people", "grades", "rosterfull", "tsec", "gradedrafts"]);
+// aiassess holds AI drafts and teacher working copies (teacher only); aipub holds what the teacher published.
+const SELF_READ = new Set(["subs", "csubs", "psubs", "people", "grades", "aipub"]);      // own doc only
+const TEACHER_READ = new Set(["subs", "csubs", "psubs", "people", "grades", "rosterfull", "tsec", "gradedrafts", "aiassess", "aipub"]);
 const NO_SYNC = new Set(["roster", "tsec"]);                                     // read one at a time
 const SEG = /^[A-Za-z0-9_\-.~:@+]{1,200}$/;
 
@@ -40,8 +41,10 @@ const isObj = v => v && typeof v === "object" && !Array.isArray(v);
 function merge(a, b) { const out = { ...a }; for (const k in b) { const v = b[k]; out[k] = isObj(v) && isObj(out[k]) ? merge(out[k], v) : v; } return out; }
 const b64u = buf => Buffer.from(buf).toString("base64url");
 export const uidFromToken = t => "u_" + createHash("sha256").update("tg|" + t).digest("base64url").slice(0, 22);
-
-export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }) {
+// Change-log key for a written doc, so /api/sync sends it to every device that may read it.
+export const logKey = (path, t = Date.now()) => `${key13(t)}${b64u(randomBytes(4))}|${path}`;
+// Teacher sign-in tokens, shared with the AI assessment function.
+export function adminAuth(env, now = () => Date.now()) {
   const secret = () => env("TG_SECRET") || createHash("sha256").update("tg-secret|" + (env("TEACHER_PASSWORD") || "")).digest("hex");
   const sign = exp => `${exp}.${createHmac("sha256", secret()).update("adm|" + exp).digest("base64url")}`;
   const adminOk = tok => {
@@ -51,6 +54,11 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
     const a = Buffer.from(sign(exp)), b = Buffer.from(tok);
     return a.length === b.length && timingSafeEqual(a, b);
   };
+  return { sign, adminOk };
+}
+
+export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }) {
+  const { sign, adminOk } = adminAuth(env, now);
   const who = req => {
     const t = req.headers.get("x-tg-token") || "";
     const uid = /^[a-f0-9]{32,128}$/.test(t) ? uidFromToken(t) : null;
@@ -130,7 +138,7 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
         if (JSON.stringify(next).length > MAX_DOC) return fail("too_large");
         await docs.setJSON(o.path, next);
       } else await docs.delete(o.path);
-      await logs.set(`${key13(now())}${b64u(randomBytes(4))}|${o.path}`, "1");
+      await logs.set(logKey(o.path, now()), "1");
     }
     return json({ ok: true });
   }

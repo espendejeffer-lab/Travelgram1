@@ -4,6 +4,7 @@
   "type": "module",
   "description": "TravelGram class site: static page plus a Netlify Function API on Netlify Blobs",
   "dependencies": {
+    "@google/genai": "^2.31.0",
     "@netlify/blobs": "^11.1.4"
   }
 }
