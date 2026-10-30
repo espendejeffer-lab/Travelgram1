@@ -2204,6 +2204,10 @@ function axDownload(type) {
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   toast(`Downloaded ${data.length - 1} row${data.length === 2 ? "" : "s"}: ${name}`);
 }
+const stuSel = () => (S.stuSel = S.stuSel || new Set());
+// A sign-in "has work" if it has a Team Story, Trip Diary, comment or AI assessment.
+const stuHasWork = uid => !!S.subs[uid] || Object.keys((S.psubs[uid] || {}).items || {}).length > 0 || S.posts.some(x => x.authorUid === uid)
+  || S.comments.some(c => c.authorUid === uid) || Object.values(S.ax).some(x => x && x.uid === uid);
 function resultsBar() {
   const open = resultsOpen(), at = S.cls && S.cls.resultsAt;
   const when = at ? ` · ${new Date(at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
@@ -2622,7 +2626,7 @@ function teacherHtml() {
     const aiCell = (m, uid, p, max) => { const v = m.has(uid) ? m.get(uid) : p && p.sid && m.has("s:" + p.sid) ? m.get("s:" + p.sid) : null; return v == null ? "—" : `<b>${fmtScore(v)}/${max}</b>`; };
     const row = (full, sid, entry, warn) => {
       const [uid, p] = entry || [], n = uid ? myApprovedOnOthers(uid) : 0, sub = uid && S.subs[uid];
-      return `<tr><td>${esc(full || (p && p.realName) || "—")}${warn ? ` <span class="tag flag">${warn}</span>` : ""}</td><td class="num" style="font-family:var(--f-mono)">${esc(sid || "—")}</td>
+      return `<tr><td>${uid ? `<input type="checkbox" data-act="stusel" data-id="${esc(uid)}" aria-label="Select ${esc((p && p.name) || full || "student")}"${stuSel().has(uid) ? " checked" : ""} style="width:20px;height:20px">` : ""}</td><td>${esc(full || (p && p.realName) || "—")}${warn ? ` <span class="tag flag">${warn}</span>` : ""}</td><td class="num" style="font-family:var(--f-mono)">${esc(sid || "—")}</td>
         <td>${p ? `<b>${esc(p.name)}</b>` : `<span class="muted">Not joined</span>`}</td><td>${p ? esc(p.team) : "—"}</td>
         <td>${uid ? (sub ? st[sub.status] || "—" : "Not posted") : "—"}</td><td class="num">${uid ? S.posts.filter(x => x.kind === "personal" && x.authorUid === uid).length : "—"}</td>
         <td class="num">${uid ? n : "—"}</td><td>${uid ? `<span class="tag ${n >= 2 ? "st-ok" : "st-pending"}">${Math.min(n, 2)}/2</span>` : ""}</td><td class="num">${uid ? aiCell(aiS, uid, p, (AIR && AIR.speaking && AIR.speaking.max) || 4) : "—"}</td><td class="num">${uid ? aiCell(aiW, uid, p, (AIR && AIR.writing && AIR.writing.max) || 16) : "—"}</td></tr>`;
@@ -2630,8 +2634,11 @@ function teacherHtml() {
     let rows = roster.map(r => { const es = byS[r.id] || []; return es.length ? es.map((e, i) => row(r.name, r.id, e, i && !TEST_RE.test(r.id) ? "Second sign-in with this ID" : "")).join("") : row(r.name, r.id, null); }).join("");
     rows += Object.entries(S.people).filter(([, p]) => !p.sid || !ids.has(p.sid)).map(e => TEST_RE.test(e[1].sid || "") ? row("Test account", e[1].sid, e, "") : row("—", e[1].sid, e, roster.length ? "Not on class list" : "")).join("");
     const joined = roster.filter(r => byS[r.id]).length;
+    const nSel = [...stuSel()].filter(u => S.people[u]).length;
     body = rows ? `<div class="stack">${roster.length ? `<p class="muted">${joined} of ${roster.length} students have joined. Full names and IDs are only visible to you.</p>` : ""}
-      <div class="panel tbl-wrap"><table><thead><tr><th>Full name</th><th>Vinschool ID</th><th>Username</th><th>Team</th><th>Team story</th><th>${W.travelTab}</th><th>Comments</th><th>Homework</th><th>🎙 Speaking (AI)</th><th>✍️ Writing (AI)</th></tr></thead><tbody>${rows}</tbody></table></div></div>`
+      <div class="panel relbox" style="justify-content:space-between"><span class="small muted">Tick sign-ins to remove them. Their posts and results stay; a removed student simply signs in again.</span>
+        <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn ghost sm" data-act="studupsel">Select empty duplicate sign-ins</button>${nSel ? `<button class="btn ghost sm" data-act="stuselnone">Clear selection</button>` : ""}<button class="btn danger sm" data-act="sturm" data-confirm="Tap again to remove ${nSel}"${nSel ? "" : " disabled"}>🗑 Remove selected (${nSel})</button></div></div>
+      <div class="panel tbl-wrap"><table><thead><tr><th><input type="checkbox" data-act="stuselall" aria-label="Select all"${S.people && Object.keys(S.people).length && Object.keys(S.people).every(u => stuSel().has(u)) ? " checked" : ""} style="width:20px;height:20px"></th><th>Full name</th><th>Vinschool ID</th><th>Username</th><th>Team</th><th>Team story</th><th>${W.travelTab}</th><th>Comments</th><th>Homework</th><th>🎙 Speaking (AI)</th><th>✍️ Writing (AI)</th></tr></thead><tbody>${rows}</tbody></table></div></div>`
       : `<div class="empty-state panel"><h3>No students yet</h3><p class="muted">Add your class list in the Class tab.</p></div>`;
   } else {
     const c = S.cls || {};
@@ -2720,6 +2727,25 @@ document.addEventListener("keydown", e => {
 /* ---------- actions ---------- */
 function fbOf(id) { const el = document.getElementById(id); return el ? el.value.trim() : ""; }
 const A = {
+  stusel(b) { const u = b.dataset.id, set = stuSel(); if (b.checked) set.add(u); else set.delete(u); paint(true); },
+  stuselall(b) { const set = stuSel(); if (b.checked) Object.keys(S.people).forEach(u => set.add(u)); else set.clear(); paint(true); },
+  stuselnone() { stuSel().clear(); paint(true); },
+  studupsel() {
+    const set = stuSel(), bySid = {};
+    Object.entries(S.people).forEach(([u, p]) => { if (p.sid) (bySid[p.sid] = bySid[p.sid] || []).push([u, p]); });
+    let n = 0;
+    Object.values(bySid).forEach(list => { if (list.length < 2) return;
+      const work = list.filter(([u]) => stuHasWork(u));
+      const keep = work.length ? new Set(work.map(([u]) => u)) : new Set([list.slice().sort((a, b) => (b[1].joinedAt || 0) - (a[1].joinedAt || 0))[0][0]]);
+      list.forEach(([u]) => { if (!keep.has(u)) { set.add(u); n++; } }); });
+    paint(true); toast(n ? `Selected ${n} empty duplicate sign-in${n === 1 ? "" : "s"}. Each student keeps the sign-ins that have work.` : "No empty duplicate sign-ins found.");
+  },
+  async sturm() {
+    const ids = [...stuSel()].filter(u => S.people[u]);
+    if (!ids.length) return;
+    for (let i = 0; i < ids.length; i += 25) await Promise.all(ids.slice(i, i + 25).map(u => Store.doc("people/" + u).delete()));
+    stuSel().clear(); toast(`Removed ${ids.length} sign-in${ids.length === 1 ? "" : "s"}.`);
+  },
   axdl(b) { axDownload(b.dataset.type); },
   async respub() { await upsert(cfgPath("class"), { resultsHidden: false, resultsAt: Date.now() }); toast("Results published. Students can now see their score and rank."); },
   async resunpub() { await upsert(cfgPath("class"), { resultsHidden: true, resultsAt: Date.now() }); toast("Results hidden. Students no longer see their score or rank."); },
@@ -2892,7 +2918,7 @@ const A = {
   }
 };
 Object.assign(A, axActs, axRankActs);
-const CONFIRM = new Set(["respub", "resunpub", "axre", "axpub", "axunpub", "axrankshow", "axrankhide", "rankrelease", "rankhide", "ghide", "logout", "delclass", "delpost", "delcmt", "reject", "creject", "preject", "delpcmt", "pcreject"]);
+const CONFIRM = new Set(["sturm", "respub", "resunpub", "axre", "axpub", "axunpub", "axrankshow", "axrankhide", "rankrelease", "rankhide", "ghide", "logout", "delclass", "delpost", "delcmt", "reject", "creject", "preject", "delpcmt", "pcreject"]);
 document.addEventListener("click", async e => {
   const b = e.target.closest("[data-act]"); if (!b) return;
   const act = b.dataset.act; if (!A[act]) return;
