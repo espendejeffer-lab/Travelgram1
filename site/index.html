@@ -2081,14 +2081,16 @@ async function applyRanks(show, gr = S.grades) {
 }
 // Ranks reach students as soon as a score is approved, unless the teacher hides them.
 const rankReleased = () => !(S.cls && S.cls.rankHidden);
+// Teacher's master switch: students see their score and rank only while results are published.
+const resultsOpen = () => !(S.cls && S.cls.resultsHidden);
 const medal = r => r === 1 ? "🥇" : r === 2 ? "🥈" : r === 3 ? "🥉" : "🏆";
 const myRank = g => g && g.rankShown && Number(g.rank) > 0 ? Number(g.rank) : 0;
 const gseenKey = g => `${(g && g.approvedAt) || ""}|${myRank(g)}`;
-const gradeNew = () => !teacherMode() && !!S.myGrade && kOf(S.myGrade) === S.klass && lsGet("tg-gseen") !== gseenKey(S.myGrade);
+const gradeNew = () => !teacherMode() && resultsOpen() && !!S.myGrade && kOf(S.myGrade) === S.klass && lsGet("tg-gseen") !== gseenKey(S.myGrade);
 /* Result notifications for students: Team Stories speaking and Trip Diaries writing. A banner (and a badge on
    My Trip Diary) appears when a result is published or its rank changes, until the student taps it. */
 function axNewsAll() {
-  const P = S.myPub; if (teacherMode() || !P || !AIR || kOf(P) !== S.klass) return [];
+  const P = S.myPub; if (teacherMode() || !resultsOpen() || !P || !AIR || kOf(P) !== S.klass) return [];
   const rk = P.rank || {}, sp = P.speak, wr = Object.values(P.write || {}).filter(Boolean), out = [];
   const rt = r => r && r.rank ? ` · ${medal(r.rank)} Rank ${r.rank} of ${r.of || "the class"}` : "";
   if (sp) out.push({ type: "speak", key: `${sp.publishedAt || ""}|${(rk.speak || {}).rank || 0}`,
@@ -2137,7 +2139,18 @@ function rankBody() {
     <ol class="rsteps">${steps.map(([h, t, done, extra], i) => `<li class="${done ? "done" : ""}"><span class="dot">${done ? "✓" : i + 1}</span><div class="stack" style="gap:6px"><b>${h}</b><p class="small muted">${t}</p>${done ? "" : extra}</div></li>`).join("")}</ol></div>`;
   return `<div class="stack">${head}${resultsPanel(key, RB, max)}</div>`;
 }
+function resultsBar() {
+  const open = resultsOpen(), at = S.cls && S.cls.resultsAt;
+  const when = at ? ` · ${new Date(at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
+  return `<div class="panel relbox" style="justify-content:space-between;margin-bottom:12px;border-left:6px solid ${open ? "var(--accent)" : "var(--hot)"}">
+    <div><span class="lbl">Student results · ${esc(clsName())}</span><p style="margin-top:2px">${open
+      ? `<span class="tag st-ok">✓ Published${esc(when)}</span> Students can see their raw score and rank.`
+      : `<span class="tag st-pending">🔒 Not published${esc(when)}</span> Students cannot see their score or rank. You can keep marking.`}</p></div>
+    ${open ? `<button class="btn danger sm" data-act="resunpub" data-confirm="Tap again to hide results">🔒 Unpublish results</button>`
+      : `<button class="btn hot" data-act="respub" data-confirm="Tap again to publish">📢 Publish results</button>`}</div>`;
+}
 function gradePanel() {
+  if (!teacherMode() && !resultsOpen()) return `<div class="panel note" id="my-score"><b>🔒 Results are not published yet</b><p class="small muted" style="margin-top:4px">Your score and your class rank will appear here when your teacher publishes them.</p></div>`;
   const g = S.myGrade; if (!g || kOf(g) !== S.klass) return "";
   const RB = RUBRICS[g.rubric] || RUBRICS[rubricKey()];
   const r = myRank(g), cl = Number(g.clarity) || 0;
@@ -2352,6 +2365,7 @@ async function axStart(id) {
   [15, 30, 45, 60, 90, 120].forEach(s => setTimeout(() => Remote.pull().catch(() => { }), s * 1000));
 }
 function axPubPanel() {
+  if (!teacherMode() && !resultsOpen()) return "";
   const P = S.myPub; if (!P || !AIR || kOf(P) !== S.klass) return "";
   const sp = P.speak, wr = Object.values(P.write || {}).filter(Boolean).sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
   if (!sp && !wr.length) return "";
@@ -2482,6 +2496,7 @@ function axRankRibbon(r, label) {
 function teacherHtml() {
   const tabs = [["queue", `Queue${pendingCount() ? ` <span class="badge-n">${pendingCount()}</span>` : ""}`], ["assess", "Assess"], ["aispeak", `🎙 Team Stories · Speaking AI${axDrafts("speak") ? ` <span class="badge-n">${axDrafts("speak")}</span>` : ""}`], ["aiwrite", `✍️ Trip Diaries · Writing AI${axDrafts("write") ? ` <span class="badge-n">${axDrafts("write")}</span>` : ""}`], ["aisrank", "🏆 Speaking ranking"], ["aiwrank", "🏆 Writing ranking"], ["rank", `🏆 Ranking${rankReady() ? ` <span class="badge-n">Ready</span>` : ""}`], ["picks", "Team Picks"], ["posts", "Posts"], ["students", "Students"], ["class", "Class"]];
   const head = `<div class="feed-head"><div><span class="lbl">Teacher dashboard · ${esc(clsName())}</span><h1>Control tower</h1></div><button class="btn teal" data-act="showcase">${ico("desk")} Start Showcase</button></div>
+    ${resultsBar()}
     <div class="ttabs">${tabs.map(([k, l]) => `<button class="chip" data-act="ttab" data-v="${k}" aria-pressed="${S.tTab === k}">${l}</button>`).join("")}</div>`;
   let body = "";
   if (S.tTab === "queue") {
@@ -2636,6 +2651,8 @@ document.addEventListener("keydown", e => {
 /* ---------- actions ---------- */
 function fbOf(id) { const el = document.getElementById(id); return el ? el.value.trim() : ""; }
 const A = {
+  async respub() { await upsert(cfgPath("class"), { resultsHidden: false, resultsAt: Date.now() }); toast("Results published. Students can now see their score and rank."); },
+  async resunpub() { await upsert(cfgPath("class"), { resultsHidden: true, resultsAt: Date.now() }); toast("Results hidden. Students no longer see their score or rank."); },
   seegrade() { lsSet("tg-gseen", gseenKey(S.myGrade)); showResult("my-score"); },
   seeax(b) { const n = axNewsAll().find(x => x.type === b.dataset.type); if (n) lsSet("tg-axseen-" + n.type, n.key); showResult("my-" + b.dataset.type); },
   async rankrelease() {
@@ -2805,7 +2822,7 @@ const A = {
   }
 };
 Object.assign(A, axActs, axRankActs);
-const CONFIRM = new Set(["axre", "axpub", "axunpub", "axrankshow", "axrankhide", "rankrelease", "rankhide", "ghide", "logout", "delclass", "delpost", "delcmt", "reject", "creject", "preject", "delpcmt", "pcreject"]);
+const CONFIRM = new Set(["respub", "resunpub", "axre", "axpub", "axunpub", "axrankshow", "axrankhide", "rankrelease", "rankhide", "ghide", "logout", "delclass", "delpost", "delcmt", "reject", "creject", "preject", "delpcmt", "pcreject"]);
 document.addEventListener("click", async e => {
   const b = e.target.closest("[data-act]"); if (!b) return;
   const act = b.dataset.act; if (!A[act]) return;
