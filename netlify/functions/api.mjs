@@ -22,6 +22,10 @@ const SELF_WRITE = new Set(["subs", "csubs", "psubs", "people", "reacts", "pcomm
 const SELF_READ = new Set(["subs", "csubs", "psubs", "people", "grades", "aipub"]);      // own doc only
 const TEACHER_READ = new Set(["subs", "csubs", "psubs", "people", "grades", "rosterfull", "tsec", "gradedrafts", "aiassess", "aipub"]);
 const NO_SYNC = new Set(["roster", "tsec"]);                                     // read one at a time
+// Results (score and rank) reach a student only while the teacher has published results for that class.
+const RESULTS = new Set(["grades", "aipub"]);
+export const classCfgPath = k => "config/" + (!k || k === "s10" ? "class" : "class-" + k);
+export const resultsOpenIn = cfg => !(cfg && cfg.resultsHidden);
 const SEG = /^[A-Za-z0-9_\-.~:@+]{1,200}$/;
 
 export function canRead(path, who) {
@@ -77,6 +81,15 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
     }
     return out;
   }
+  // One config read per class per request: are results published for this class?
+  function resultsGate() {
+    const seen = new Map();
+    return async doc => {
+      const k = (doc && doc.k) || "s10";
+      if (!seen.has(k)) seen.set(k, readDoc(classCfgPath(k)).then(resultsOpenIn));
+      return seen.get(k);
+    };
+  }
   async function listLogs() { const { blobs } = await logs.list(); return blobs.map(b => b.key).sort(); }
   const logPath = k => k.slice(k.indexOf("|") + 1);
 
@@ -109,11 +122,12 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
     }
     const changed = [...new Set(logKeys.filter(k => k > from).map(logPath))];
     const fresh = await readMany(changed);
-    const out = {};
+    const out = {}, open = resultsGate();
     for (const [p, v] of Object.entries(full ? { ...base, ...fresh } : fresh)) {
       const c = p.split("/")[0];
       if (NO_SYNC.has(c) || !canRead(p, w)) continue;
-      out[p] = v;
+      // While results are unpublished, a student's own result doc is sent as "deleted".
+      out[p] = !w.admin && RESULTS.has(c) && v && !(await open(v)) ? null : v;
     }
     if (logKeys.length > SNAP_EVERY) {
       const job = buildSnapshot().catch(e => console.error("TravelGram snapshot", e));
@@ -139,8 +153,17 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
         await docs.setJSON(o.path, next);
       } else await docs.delete(o.path);
       await logs.set(logKey(o.path, now()), "1");
+      // Publishing or unpublishing results: re-send every result doc so students' pages update.
+      if (o.path.startsWith("config/class") && o.data && "resultsHidden" in o.data) await touchResults();
     }
     return json({ ok: true });
+  }
+
+  async function touchResults() {
+    for (const prefix of ["grades/", "aipub/"]) {
+      const { blobs } = await docs.list({ prefix });
+      for (let i = 0; i < blobs.length; i += 25) await Promise.all(blobs.slice(i, i + 25).map(b => logs.set(logKey(b.key, now()), "1")));
+    }
   }
 
   async function passwordOk(pw) {
@@ -256,6 +279,7 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
         if (!validPath(path)) return fail("bad_request");
         if (!canRead(path, w)) return json({ exists: false });
         const d = await readDoc(path);
+        if (d && !w.admin && RESULTS.has(path.split("/")[0]) && !(await resultsGate()(d))) return json({ exists: false });
         return json(d ? { exists: true, data: d } : { exists: false });
       }
       let m;
