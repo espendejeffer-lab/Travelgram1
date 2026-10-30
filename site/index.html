@@ -2086,7 +2086,7 @@ const resultsOpen = () => !(S.cls && S.cls.resultsHidden);
 const medal = r => r === 1 ? "🥇" : r === 2 ? "🥈" : r === 3 ? "🥉" : "🏆";
 const myRank = g => g && g.rankShown && Number(g.rank) > 0 ? Number(g.rank) : 0;
 const gseenKey = g => `${(g && g.approvedAt) || ""}|${myRank(g)}`;
-const gradeNew = () => !teacherMode() && resultsOpen() && !!S.myGrade && kOf(S.myGrade) === S.klass && lsGet("tg-gseen") !== gseenKey(S.myGrade);
+const gradeNew = () => false && !!S.myGrade && kOf(S.myGrade) === S.klass && lsGet("tg-gseen") !== gseenKey(S.myGrade);
 /* Result notifications for students: Team Stories speaking and Trip Diaries writing. A banner (and a badge on
    My Trip Diary) appears when a result is published or its rank changes, until the student taps it. */
 function axNewsAll() {
@@ -2151,6 +2151,7 @@ function resultsBar() {
 }
 function gradePanel() {
   if (!teacherMode() && !resultsOpen()) return `<div class="panel note" id="my-score"><b>🔒 Results are not published yet</b><p class="small muted" style="margin-top:4px">Your score and your class rank will appear here when your teacher publishes them.</p></div>`;
+  return ""; // Results now come only from the AI assessments (Team Stories speaking and Trip Diaries writing).
   const g = S.myGrade; if (!g || kOf(g) !== S.klass) return "";
   const RB = RUBRICS[g.rubric] || RUBRICS[rubricKey()];
   const r = myRank(g), cl = Number(g.clarity) || 0;
@@ -2494,7 +2495,7 @@ function axRankRibbon(r, label) {
   return r && r.rank ? `<div class="rank-ribbon"><span class="medal" aria-hidden="true">${medal(r.rank)}</span><div><span class="lbl" style="color:inherit">${esc(label)} ranking · ${esc(clsName())}</span><b>Rank ${r.rank} of ${r.of || "the class"}</b><span class="small">${r.rank <= (r.top || rankTopFor()) ? `You are in the top ${r.top || rankTopFor()} in your class. Well done!` : "Keep going to climb the ranking!"}</span></div></div>` : "";
 }
 function teacherHtml() {
-  const tabs = [["queue", `Queue${pendingCount() ? ` <span class="badge-n">${pendingCount()}</span>` : ""}`], ["assess", "Assess"], ["aispeak", `🎙 Team Stories · Speaking AI${axDrafts("speak") ? ` <span class="badge-n">${axDrafts("speak")}</span>` : ""}`], ["aiwrite", `✍️ Trip Diaries · Writing AI${axDrafts("write") ? ` <span class="badge-n">${axDrafts("write")}</span>` : ""}`], ["aisrank", "🏆 Speaking ranking"], ["aiwrank", "🏆 Writing ranking"], ["rank", `🏆 Ranking${rankReady() ? ` <span class="badge-n">Ready</span>` : ""}`], ["picks", "Team Picks"], ["posts", "Posts"], ["students", "Students"], ["class", "Class"]];
+  const tabs = [["queue", `Queue${pendingCount() ? ` <span class="badge-n">${pendingCount()}</span>` : ""}`], ["aispeak", `🎙 Team Stories · Speaking AI${axDrafts("speak") ? ` <span class="badge-n">${axDrafts("speak")}</span>` : ""}`], ["aiwrite", `✍️ Trip Diaries · Writing AI${axDrafts("write") ? ` <span class="badge-n">${axDrafts("write")}</span>` : ""}`], ["aisrank", "🏆 Speaking ranking"], ["aiwrank", "🏆 Writing ranking"], ["rank", `🏆 Ranking${rankReady() ? ` <span class="badge-n">Ready</span>` : ""}`], ["picks", "Team Picks"], ["posts", "Posts"], ["students", "Students"], ["class", "Class"]];
   const head = `<div class="feed-head"><div><span class="lbl">Teacher dashboard · ${esc(clsName())}</span><h1>Control tower</h1></div><button class="btn teal" data-act="showcase">${ico("desk")} Start Showcase</button></div>
     ${resultsBar()}
     <div class="ttabs">${tabs.map(([k, l]) => `<button class="chip" data-act="ttab" data-v="${k}" aria-pressed="${S.tTab === k}">${l}</button>`).join("")}</div>`;
@@ -2537,8 +2538,6 @@ function teacherHtml() {
         <div class="row">${p.kind === "personal" ? "" : `<button class="btn ghost sm" data-act="pin" data-id="${esc(p.id)}">${S.feed.pinned === p.id ? "Unpin" : "Pin"}</button>`}<button class="btn danger sm" data-act="delpost" data-id="${esc(p.id)}">Delete</button></div></div>`).join("")}</div>` : `<p class="muted">No approved posts yet.</p>`}</div>`;
   } else if (S.tTab === "rank") {
     body = rankBody();
-  } else if (S.tTab === "assess") {
-    body = assessBody();
   } else if (S.tTab === "aispeak") {
     body = axSpeakBody();
   } else if (S.tTab === "aiwrite") {
@@ -2551,18 +2550,22 @@ function teacherHtml() {
     const st = { pending: "Waiting", approved: "On feed", returned: "Sent back", rejected: "Rejected", removed: "Removed" };
     const roster = (S.roster && S.roster.students) || [], ids = new Set(roster.map(r => r.id)), byS = {};
     Object.entries(S.people).forEach(([uid, p]) => { if (p.sid) (byS[p.sid] = byS[p.sid] || []).push([uid, p]); });
+    const aiS = new Map(), aiW = new Map();
+    axRankList("speak").forEach(e => { aiS.set(e.uid, e.score); if (e.p.sid) aiS.set("s:" + e.p.sid, e.score); });
+    axRankList("write").forEach(e => { aiW.set(e.uid, e.score); if (e.p.sid) aiW.set("s:" + e.p.sid, e.score); });
+    const aiCell = (m, uid, p, max) => { const v = m.has(uid) ? m.get(uid) : p && p.sid && m.has("s:" + p.sid) ? m.get("s:" + p.sid) : null; return v == null ? "—" : `<b>${fmtScore(v)}/${max}</b>`; };
     const row = (full, sid, entry, warn) => {
       const [uid, p] = entry || [], n = uid ? myApprovedOnOthers(uid) : 0, sub = uid && S.subs[uid];
       return `<tr><td>${esc(full || (p && p.realName) || "—")}${warn ? ` <span class="tag flag">${warn}</span>` : ""}</td><td class="num" style="font-family:var(--f-mono)">${esc(sid || "—")}</td>
         <td>${p ? `<b>${esc(p.name)}</b>` : `<span class="muted">Not joined</span>`}</td><td>${p ? esc(p.team) : "—"}</td>
         <td>${uid ? (sub ? st[sub.status] || "—" : "Not posted") : "—"}</td><td class="num">${uid ? S.posts.filter(x => x.kind === "personal" && x.authorUid === uid).length : "—"}</td>
-        <td class="num">${uid ? n : "—"}</td><td>${uid ? `<span class="tag ${n >= 2 ? "st-ok" : "st-pending"}">${Math.min(n, 2)}/2</span>` : ""}</td><td class="num">${uid && S.grades[uid] ? `<b>${fmtScore(S.grades[uid].total)}/${S.grades[uid].max}</b>` : uid && S.gdrafts[uid] ? "Draft" : "—"}</td></tr>`;
+        <td class="num">${uid ? n : "—"}</td><td>${uid ? `<span class="tag ${n >= 2 ? "st-ok" : "st-pending"}">${Math.min(n, 2)}/2</span>` : ""}</td><td class="num">${uid ? aiCell(aiS, uid, p, (AIR && AIR.speaking && AIR.speaking.max) || 4) : "—"}</td><td class="num">${uid ? aiCell(aiW, uid, p, (AIR && AIR.writing && AIR.writing.max) || 16) : "—"}</td></tr>`;
     };
     let rows = roster.map(r => { const es = byS[r.id] || []; return es.length ? es.map((e, i) => row(r.name, r.id, e, i && !TEST_RE.test(r.id) ? "Second sign-in with this ID" : "")).join("") : row(r.name, r.id, null); }).join("");
     rows += Object.entries(S.people).filter(([, p]) => !p.sid || !ids.has(p.sid)).map(e => TEST_RE.test(e[1].sid || "") ? row("Test account", e[1].sid, e, "") : row("—", e[1].sid, e, roster.length ? "Not on class list" : "")).join("");
     const joined = roster.filter(r => byS[r.id]).length;
     body = rows ? `<div class="stack">${roster.length ? `<p class="muted">${joined} of ${roster.length} students have joined. Full names and IDs are only visible to you.</p>` : ""}
-      <div class="panel tbl-wrap"><table><thead><tr><th>Full name</th><th>Vinschool ID</th><th>Username</th><th>Team</th><th>Team story</th><th>${W.travelTab}</th><th>Comments</th><th>Homework</th><th>Score</th></tr></thead><tbody>${rows}</tbody></table></div></div>`
+      <div class="panel tbl-wrap"><table><thead><tr><th>Full name</th><th>Vinschool ID</th><th>Username</th><th>Team</th><th>Team story</th><th>${W.travelTab}</th><th>Comments</th><th>Homework</th><th>🎙 Speaking (AI)</th><th>✍️ Writing (AI)</th></tr></thead><tbody>${rows}</tbody></table></div></div>`
       : `<div class="empty-state panel"><h3>No students yet</h3><p class="muted">Add your class list in the Class tab.</p></div>`;
   } else {
     const c = S.cls || {};
