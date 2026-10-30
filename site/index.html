@@ -2148,6 +2148,62 @@ function rankBody() {
     <ol class="rsteps">${steps.map(([h, t, done, extra], i) => `<li class="${done ? "done" : ""}"><span class="dot">${done ? "✓" : i + 1}</span><div class="stack" style="gap:6px"><b>${h}</b><p class="small muted">${t}</p>${done ? "" : extra}</div></li>`).join("")}</ol></div>`;
   return `<div class="stack">${head}${resultsPanel(key, RB, max)}</div>`;
 }
+/* ---------- Download results (CSV, opens in Excel or Google Sheets) ----------
+   One file per project. Speaking: one row per student (latest published Team Story).
+   Writing: one row per published Trip Diary, with the student's average and rank. Students
+   with nothing published are listed at the end so nobody is missed. */
+function axExportRows(type) {
+  const R0 = axR(type), ranks = new Map(axRankList(type).map(e => [e.p.sid || e.uid, e]));
+  const roster = (S.roster && S.roster.students) || [], nameOf = new Map(roster.map(r => [r.id, r.name]));
+  const crit = R0.crit, head = ["Rank", "Full name", "Username", "Vinschool ID", "Team", type === "speak" ? "Team Story title" : "Trip Diary title"];
+  crit.forEach(c => head.push(`${c.code} ${c.title} (/4)`, `${c.code} level`));
+  head.push(`Total (/${R0.max})`);
+  if (type === "write") head.push("Student average", "Photo match (/4, not in total)");
+  if (type === "speak") head.push("Performance level");
+  head.push("Strengths", "Areas for improvement", "Teacher feedback", "Status", "Published");
+  const rows = [], done = new Set();
+  const when = t => t ? new Date(t).toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  const list = Object.values(S.ax).filter(x => x && x.type === type && kOf(x) === S.klass && x.status === "published" && x.pub && S.people[x.uid] && !isTestP(S.people[x.uid]));
+  const bySid = {};
+  list.forEach(x => { const p = S.people[x.uid], key = p.sid || x.uid; (bySid[key] = bySid[key] || []).push(x); });
+  Object.entries(bySid).forEach(([key, xs]) => {
+    xs.sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
+    const use = type === "speak" ? [xs[0]] : xs, e = ranks.get(key);
+    use.forEach(x => {
+      const p = S.people[x.uid], r = axNorm(x.pub), sc = r.scores || {};
+      const pc = (r.crit || []).reduce((m, c) => (m[c.id] = c, m), {});
+      const src = type === "speak" ? S.subs[x.uid] : ((S.psubs[x.uid] || {}).items || {})[x.pid];
+      const row = [e ? e.rank : "", nameOf.get(p.sid) || p.realName || "", p.name || "", p.sid || "", p.team || "", r.title || (src && src.title) || ""];
+      crit.forEach(c => { const v = sc[c.id]; row.push(v != null && v !== "" ? Number(v) : "", (pc[c.id] && pc[c.id].level) || axLevel(v, R0)); });
+      row.push(r.total != null ? r.total : axTotal(sc, R0));
+      if (type === "write") row.push(e ? e.score : "", r.photo && r.photo.score ? r.photo.score : "");
+      if (type === "speak") row.push(r.level || "");
+      row.push((r.strengths || []).join(" | "), (r.improvements || []).join(" | "), r.feedback || "", "Published", when(x.publishedAt || r.publishedAt));
+      rows.push(row);
+    });
+    done.add(key);
+  });
+  rows.sort((a, b) => (Number(a[0]) || 999) - (Number(b[0]) || 999) || String(a[1]).localeCompare(String(b[1])));
+  const pad = n => Array(n).fill("");
+  const nCols = head.length;
+  roster.forEach(r => { if (done.has(r.id) || TEST_RE.test(r.id)) return;
+    const ps = Object.values(S.people).filter(p => p.sid === r.id), p = ps[0] || {};
+    const x = Object.values(S.ax).find(a => a && a.type === type && kOf(a) === S.klass && ps.some(q => S.people[a.uid] === q));
+    const st = !ps.length ? "Not joined" : x ? (x.status === "reviewed" ? "Reviewed, not published" : "Draft, not published") : "Not assessed";
+    const row = ["", r.name || "", p.name || "", r.id, p.team || "", ...pad(nCols - 5)];
+    row[nCols - 2] = st; rows.push(row); });
+  return [head, ...rows];
+}
+function axDownload(type) {
+  if (!AIR) { toast("The AI rubric is still loading. Try again in a moment."); return; }
+  const data = axExportRows(type);
+  const cell = v => { const t = v == null ? "" : String(v); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const csv = "﻿" + data.map(r => r.map(cell).join(",")).join("\r\n");
+  const name = `${clsName()} ${type === "speak" ? "Team Stories - Speaking" : "Trip Diaries - Writing"} results ${new Date().toISOString().slice(0, 10)}.csv`.replace(/[\\/:*?"<>|]/g, "-");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  toast(`Downloaded ${data.length - 1} row${data.length === 2 ? "" : "s"}: ${name}`);
+}
 function resultsBar() {
   const open = resultsOpen(), at = S.cls && S.cls.resultsAt;
   const when = at ? ` · ${new Date(at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
@@ -2155,8 +2211,9 @@ function resultsBar() {
     <div><span class="lbl">Student results · ${esc(clsName())}</span><p style="margin-top:2px">${open
       ? `<span class="tag st-ok">✓ Published${esc(when)}</span> Students can see their raw score and rank.`
       : `<span class="tag st-pending">🔒 Not published${esc(when)}</span> Students cannot see their score or rank. You can keep marking.`}</p></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn ghost sm" data-act="axdl" data-type="speak">⬇ Download Speaking results</button><button class="btn ghost sm" data-act="axdl" data-type="write">⬇ Download Writing results</button>
     ${open ? `<button class="btn danger sm" data-act="resunpub" data-confirm="Tap again to hide results">🔒 Unpublish results</button>`
-      : `<button class="btn hot" data-act="respub" data-confirm="Tap again to publish">📢 Publish results</button>`}</div>`;
+      : `<button class="btn hot" data-act="respub" data-confirm="Tap again to publish">📢 Publish results</button>`}</div></div>`;
 }
 function gradePanel() {
   if (!teacherMode() && !resultsOpen()) return `<div class="panel note" id="my-score"><b>🔒 Results are not published yet</b><p class="small muted" style="margin-top:4px">Your score and your class rank will appear here when your teacher publishes them.</p></div>`;
@@ -2663,6 +2720,7 @@ document.addEventListener("keydown", e => {
 /* ---------- actions ---------- */
 function fbOf(id) { const el = document.getElementById(id); return el ? el.value.trim() : ""; }
 const A = {
+  axdl(b) { axDownload(b.dataset.type); },
   async respub() { await upsert(cfgPath("class"), { resultsHidden: false, resultsAt: Date.now() }); toast("Results published. Students can now see their score and rank."); },
   async resunpub() { await upsert(cfgPath("class"), { resultsHidden: true, resultsAt: Date.now() }); toast("Results hidden. Students no longer see their score or rank."); },
   seegrade() { lsSet("tg-gseen", gseenKey(S.myGrade)); showResult("my-score"); },
