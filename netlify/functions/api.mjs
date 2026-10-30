@@ -90,6 +90,33 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
       return seen.get(k);
     };
   }
+  // A student may sign in on several devices (one account per device, same Vinschool ID).
+  // Their published AI results are combined from every account with the same ID.
+  async function sameStudentUids(uid) {
+    const me = await readDoc("people/" + uid);
+    if (!me || !me.sid) return [uid];
+    const { blobs } = await docs.list({ prefix: "people/" });
+    const all = await readMany(blobs.map(b => b.key));
+    const ids = Object.entries(all).filter(([, p]) => p && p.sid === me.sid).map(([k]) => k.slice(7));
+    return ids.includes(uid) ? ids : [uid, ...ids];
+  }
+  async function mergedPub(uid) {
+    const uids = await sameStudentUids(uid);
+    const got = await readMany(uids.map(u => "aipub/" + u));
+    const list = uids.map(u => got["aipub/" + u]).filter(Boolean);
+    if (!list.length) return null;
+    const mine = got["aipub/" + uid];
+    const out = { k: (mine && mine.k) || list[0].k, speak: null, write: {}, rank: {} };
+    for (const d of list) {
+      if (d.speak && (!out.speak || (d.speak.publishedAt || 0) > (out.speak.publishedAt || 0))) out.speak = d.speak;
+      for (const [pid, r] of Object.entries(d.write || {})) if (r || !(pid in out.write)) out.write[pid] = r || out.write[pid] || null;
+      for (const [t, r] of Object.entries(d.rank || {})) {
+        const cur = out.rank[t];
+        if (r && (!cur || (r.at || 0) > (cur.at || 0))) out.rank[t] = r; else if (!(t in out.rank)) out.rank[t] = null;
+      }
+    }
+    return out;
+  }
   async function listLogs() { const { blobs } = await logs.list(); return blobs.map(b => b.key).sort(); }
   const logPath = k => k.slice(k.indexOf("|") + 1);
 
@@ -128,6 +155,11 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
       if (NO_SYNC.has(c) || !canRead(p, w)) continue;
       // While results are unpublished, a student's own result doc is sent as "deleted".
       out[p] = !w.admin && RESULTS.has(c) && v && !(await open(v)) ? null : v;
+    }
+    // Send the student's results combined across all their devices, under their own path.
+    if (!w.admin && w.uid && (full || changed.some(p => /^(aipub|people|config)\//.test(p)))) {
+      const mp = "aipub/" + w.uid, m = await mergedPub(w.uid);
+      if (m) out[mp] = (await open(m)) ? m : null; else if (full) delete out[mp]; else out[mp] = null;
     }
     if (logKeys.length > SNAP_EVERY) {
       const job = buildSnapshot().catch(e => console.error("TravelGram snapshot", e));
@@ -279,6 +311,10 @@ export function makeApi({ docs, logs, meta, media, env, now = () => Date.now() }
         if (!validPath(path)) return fail("bad_request");
         if (!canRead(path, w)) return json({ exists: false });
         const d = await readDoc(path);
+        if (!w.admin && w.uid && path === "aipub/" + w.uid) {
+          const m = await mergedPub(w.uid);
+          return json(m && (await resultsGate()(m)) ? { exists: true, data: m } : { exists: false });
+        }
         if (d && !w.admin && RESULTS.has(path.split("/")[0]) && !(await resultsGate()(d))) return json({ exists: false });
         return json(d ? { exists: true, data: d } : { exists: false });
       }
