@@ -128,28 +128,28 @@
       "id": "c2",
       "code": "9Sc.02",
       "title": "Ask questions to find out detailed information and to clarify meaning and opinion on a wide range of topics, including unfamiliar topics, and respond accordingly.",
-      "focus": "In the travel vlog: asking questions on camera to find out detailed information and opinions (interviewing teammates, locals, vendors or guides, or asking viewers), asking follow-up and clarifying questions (e.g. 'What do you mean by…?', 'Why do you recommend…?'), and responding naturally to the answers. Questions on classmates' vlogs are supporting evidence.",
+      "focus": "The student's own speaking in the travel vlog (not interviews): asking questions to the viewers and to teammates on camera (e.g. 'Have you ever tried…?', 'Why is this place so famous?'), raising questions about new or unfamiliar things and answering them, clarifying meaning and opinions for viewers (e.g. 'In other words…', 'What I mean is…'), and responding to teammates' comments. Questions on classmates' vlogs are supporting evidence.",
       "interaction": true,
       "desc": {
        "4": [
-        "Asks a range of clear, open and follow-up questions in the vlog (e.g. interviewing teammates, locals or vendors) to find out detailed information, opinions and recommendations.",
-        "Checks and clarifies meaning and opinions naturally (e.g. “So you mean…?”, “Why do you think…?”), including on unfamiliar topics.",
-        "Responds to answers appropriately, reacting, commenting and linking them to the vlog’s story, so the interaction feels natural and engaging for viewers."
+        "Uses a range of clear, well-placed questions while speaking in the vlog (to viewers and teammates) to introduce and explore detailed information and opinions, including unfamiliar topics.",
+        "Clarifies meaning and opinions naturally for viewers (e.g. explaining new words, giving reasons: “What I mean is…”, “In other words…”).",
+        "Answers and responds to the questions raised with detailed, relevant explanations, and reacts naturally to teammates, keeping the vlog engaging."
        ],
        "3": [
-        "Asks relevant questions in the vlog to find out information and opinions, with some follow-up questions.",
-        "Clarifies meaning or opinions some of the time when an answer is unclear.",
-        "Responds appropriately to most answers, although reactions are sometimes brief or not developed."
+        "Uses relevant questions while speaking in the vlog to introduce information and opinions.",
+        "Clarifies meaning or opinions some of the time, for example by explaining a new word or giving a reason.",
+        "Answers most of the questions raised appropriately, although some answers are brief or not developed."
        ],
        "2": [
-        "Asks a few simple, mostly closed (yes/no) questions in the vlog that gather limited information.",
-        "Rarely checks or clarifies meaning or opinions; follow-up questions are missing or clearly scripted.",
-        "Gives minimal or repetitive responses to answers; the interaction sounds read from a script."
+        "Uses a few simple or repetitive questions (mostly yes/no) that add little information.",
+        "Rarely clarifies meaning or opinions; unfamiliar ideas are left unexplained.",
+        "Gives short or incomplete answers to the questions raised; speaking sounds mostly read from a script."
        ],
        "1": [
-        "Asks very few or no questions in the vlog, or the questions are unclear or irrelevant.",
+        "Asks very few or no questions while speaking in the vlog, or the questions are unclear or irrelevant.",
         "Does not clarify meaning or opinions.",
-        "Gives little or no response to answers; there is almost no interaction with people or viewers."
+        "Leaves questions unanswered or gives very limited responses; there is almost no interaction with viewers or teammates."
        ]
       }
      }
